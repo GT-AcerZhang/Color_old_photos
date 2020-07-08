@@ -11,7 +11,7 @@ from data_reader import reader
 TEST_DATA_PATH = "./data/val"
 MODEL_DIR = "./best_model.color"
 
-IM_SIZE = [512] * 2
+IM_SIZE = [256] * 2
 
 place = fluid.CPUPlace()
 exe = fluid.Executor(place)
