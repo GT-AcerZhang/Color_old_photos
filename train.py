@@ -40,7 +40,7 @@ with fluid.program_guard(train_program, start_program):
     inp_img = fluid.data(name="inp_img", shape=[-1, 1] + IM_SIZE)
     ori_img = fluid.data(name="ori_img", shape=[-1, 2] + IM_SIZE)
     out_put = unet(inp_img, 64)
-    out_put = fluid.layers.conv2d(out_put, 2, 3, padding="SAME")
+    out_put = fluid.layers.conv2d(out_put, 2, 3, padding="SAME", groups=2)
     # out_put = hrnet(inp_img, 2)
     out_put_c = fluid.layers.flatten(out_put)
     ori_img = fluid.layers.flatten(ori_img)
