@@ -16,6 +16,7 @@ def reader(data_path, target_size: list, is_val: bool = False):
         for file_name in file_names:
             try:
                 ori_img = cv.imread(os.path.join(data_path, file_name))
+                ori_l = cv.split(ori_img)[0]
                 ori_h, ori_w = ori_img.shape[:-1]
                 ori_img = cv.cvtColor(ori_img, cv.COLOR_BGR2LAB)
                 ori_img = cv.resize(ori_img, (th, tw))
@@ -23,7 +24,7 @@ def reader(data_path, target_size: list, is_val: bool = False):
                 im_l = np.array(l).reshape((1, 1, th, tw)).astype("float32")
                 im_l /= 255
                 if is_val:
-                    yield im_l, ori_h, ori_w
+                    yield im_l, ori_l, ori_h, ori_w
                 else:
                     im_a = np.array(a).reshape((1, 1, th, tw)).astype("float32")
                     im_b = np.array(b).reshape((1, 1, th, tw)).astype("float32")

@@ -11,7 +11,6 @@ from models.modeling.unet import unet
 from models.modeling.hrnet import hrnet
 from data_reader import reader
 
-
 LOAD_CHECKPOINT = False
 LOAD_PER_MODEL = False
 
@@ -79,10 +78,10 @@ if os.path.exists(PER_MODEL_DIR) and LOAD_PER_MODEL:
 
 MIN_LOSS = 1.
 for epoch in range(EPOCH):
-    start_time = time.time()
     out_loss = list()
     lr = None
     for data_id, data in enumerate(train_reader()):
+        start_time = time.time()
         out = exe.run(program=train_program,
                       feed=feeder.feed(data),
                       fetch_list=[loss, decayed_lr])
@@ -96,7 +95,6 @@ for epoch in range(EPOCH):
                   "TRAIN:\t{:.6f}".format(sum(out_loss) / len(out_loss)),
                   "\tTIME:\t{:.4f}/s".format(cost_time / BATCH_SIZE),
                   "\tLR:", lr)
-            start_time = time.time()
             out_loss = list()
         if data_id % 100 == 0:
             out_loss = list()
@@ -106,7 +104,7 @@ for epoch in range(EPOCH):
                               fetch_list=[loss])
                 out_loss.append(out[0][0])
             test_loss = sum(out_loss) / len(out_loss)
-
+            out_loss = list()
             if test_loss <= MIN_LOSS:
                 MIN_LOSS = test_loss
                 fluid.io.save_inference_model(dirname=MODEL_DIR,
