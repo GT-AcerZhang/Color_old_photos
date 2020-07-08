@@ -25,13 +25,17 @@ feeder = fluid.DataFeeder(place=place, feed_list=feed_list, program=program)
 
 for data in infer_reader():
     ipt_data = [i[0] for i in data]
-    ipt_h = [i[1] for i in data]
-    ipt_w = [i[2] for i in data]
+    ipt_l = [i[1] for i in data]
+    ipt_h = [i[2] for i in data]
+    ipt_w = [i[3] for i in data]
     out = exe.run(program, feeder.feed(ipt_data), fetch_list=target_list)
-    for img_h, img_w, img_l, img_ab in zip(ipt_h, ipt_w, ipt_data, out[0]):
-        img_l = img_l.reshape((1, 512, 512))
-        img = np.concatenate([img_l, img_ab]).reshape((3, 512, 512)).transpose(1, 2, 0) * 254
-        im = cv.cvtColor(img.astype("uint8"), cv.COLOR_LAB2BGR)
+    for img_h, img_w, img_l, img_ab in zip(ipt_h, ipt_w, ipt_l, out[0]):
+        img_ab = img_ab.reshape((2, IM_SIZE[0], IM_SIZE[1])).transpose(1, 2, 0) * 254
+        img_a, img_b = cv.split(img_ab.astype("uint8"))
+        img_a_r = cv.resize(img_a.astype("uint8"), (img_w, img_h))
+        img_b_r = cv.resize(img_b.astype("uint8"), (img_w, img_h))
+        img = cv.merge([img_l, img_a_r, img_b_r])
+        im = cv.cvtColor(img, cv.COLOR_LAB2BGR)
         im = cv.resize(im, (img_w, img_h))
         cv.imshow("Result", im)
         cv.imwrite("result.jpg", im)
