@@ -7,8 +7,8 @@ import time
 
 import paddle.fluid as fluid
 
-from models.modeling.unet import unet
-from models.modeling.hrnet import hrnet
+from models.libs.model_libs import scope
+from models.modeling.unet import encode, decode, get_logit
 from data_reader import reader
 
 LOAD_CHECKPOINT = False
@@ -20,11 +20,15 @@ CHECK_POINT_DIR = "./check_model.color"
 PER_MODEL_DIR = "./data/unet_coco_v3"
 MODEL_DIR = "./best_model.color"
 
+
 EPOCH = 5
 BATCH_SIZE = 8
-IM_SIZE = [512] * 2
+IM_SIZE = [256] * 2
+SIGNAL_A_NUM = 17
+SIGNAL_B_NUM = 20
+
 BOUNDARIES = [1000, 2000, 5000, 10000]
-VALUES = [0.01, 0.005, 0.001, 0.0005, 0.0001]
+VALUES = [0.005, 0.001, 0.0005, 0.0001, 0.00005]
 WARM_UP_STEPS = 150
 START_LR = 0.005
 END_LR = 0.01
@@ -37,32 +41,43 @@ train_program = fluid.Program()
 start_program = fluid.Program()
 
 with fluid.program_guard(train_program, start_program):
-    inp_img = fluid.data(name="inp_img", shape=[-1, 1] + IM_SIZE)
-    ori_img = fluid.data(name="ori_img", shape=[-1, 2] + IM_SIZE)
-    out_put = unet(inp_img, 2)
-    # out_put = hrnet(inp_img, 2)
-    out_put_c = fluid.layers.flatten(out_put)
-    ori_img = fluid.layers.flatten(ori_img)
-    cost = fluid.layers.square_error_cost(out_put_c, ori_img)
+    img_a = fluid.data(name="img_a", shape=[-1, 1] + IM_SIZE)
+    label_a = fluid.data(name="label_a", shape=[-1, 1] + IM_SIZE, dtype="int64")
+    label_b = fluid.data(name="label_b", shape=[-1, 1] + IM_SIZE, dtype="int64")
+
+    encode_data, short_cuts = encode(img_a)
+    with scope("signal_a"):
+        decode_a = decode(encode_data, short_cuts)
+        signal_a = get_logit(decode_a, SIGNAL_A_NUM)
+    with scope("signal_b"):
+        decode_b = decode(encode_data, short_cuts)
+        signal_b = get_logit(decode_b, SIGNAL_B_NUM)
+    clip = fluid.clip.GradientClipByGlobalNorm(clip_norm=1.0)
+    cost_a = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
+    cost_b = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
+    cost = cost_a + cost_b
     loss = fluid.layers.mean(cost)
     test_program = train_program.clone(for_test=True)
 
+    signal_a_out = fluid.layers.argmax(x=signal_a, axis=1)
+    signal_b_out = fluid.layers.argmax(x=signal_b, axis=1)
+    signal_sum = fluid.layers.concat([signal_a_out, signal_b_out], 1)
     learning_rate = fluid.layers.piecewise_decay(boundaries=BOUNDARIES, values=VALUES)
     decayed_lr = fluid.layers.linear_lr_warmup(learning_rate,
                                                WARM_UP_STEPS,
                                                START_LR,
                                                END_LR)
-    opt = fluid.optimizer.Adamax(decayed_lr)
+    opt = fluid.optimizer.Adamax(decayed_lr, grad_clip=clip)
     opt.minimize(loss)
 
 train_reader = fluid.io.batch(
-    reader=fluid.io.shuffle(reader(TRAIN_DATA_PATH, IM_SIZE), buf_size=4096),
+    reader=fluid.io.shuffle(reader(TRAIN_DATA_PATH), buf_size=4096),
     batch_size=BATCH_SIZE)
 test_reader = fluid.io.batch(
-    reader=reader(TEST_DATA_PATH, IM_SIZE),
+    reader=reader(TEST_DATA_PATH),
     batch_size=BATCH_SIZE * 2)
 
-feeder = fluid.DataFeeder(place=place, feed_list=["inp_img", "ori_img"], program=train_program)
+feeder = fluid.DataFeeder(place=place, feed_list=["img_a", "label_a", "label_b"], program=train_program)
 
 exe.run(start_program)
 if os.path.exists(CHECK_POINT_DIR + ".pdopt") and LOAD_CHECKPOINT:
@@ -76,7 +91,7 @@ def if_exist(var):
 if os.path.exists(PER_MODEL_DIR) and LOAD_PER_MODEL:
     fluid.io.load_vars(exe, PER_MODEL_DIR, train_program, predicate=if_exist)
 
-MIN_LOSS = 1.
+MIN_LOSS = 10.
 for epoch in range(EPOCH):
     out_loss = list()
     lr = None
@@ -108,8 +123,8 @@ for epoch in range(EPOCH):
             if test_loss <= MIN_LOSS:
                 MIN_LOSS = test_loss
                 fluid.io.save_inference_model(dirname=MODEL_DIR,
-                                              feeded_var_names=["inp_img"],
-                                              target_vars=[out_put],
+                                              feeded_var_names=["img_a"],
+                                              target_vars=[signal_sum],
                                               executor=exe,
                                               main_program=train_program)
             fluid.io.save(train_program, CHECK_POINT_DIR)
