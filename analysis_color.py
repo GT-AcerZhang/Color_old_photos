@@ -6,6 +6,7 @@ import os
 
 import numpy as np
 import cv2 as cv
+from sklearn.cluster import KMeans
 
 BLOCK_SIZE1D = 60  # 1D细分类块大小，越大分类数越高，效果越好 - 模型大小会增加
 MAX_STEP = 10  # 最大步长，越低效果越好
@@ -67,7 +68,7 @@ signal_cache_b = signal_cache_b / img_num * 1000000
 a_step = np.sum(signal_cache_a) / BLOCK_SIZE1D
 b_step = np.sum(signal_cache_b) / BLOCK_SIZE1D
 
-print("生成颜色字典...")
+print("正在生成字典...")
 
 a_dict, al_dict, a_num = analysis1d(signal_cache_a, a_step)
 b_dict, bl_dict, b_num = analysis1d(signal_cache_b, b_step)
