@@ -43,15 +43,6 @@ def analysis1d(signal, step):
     return block_list, color_list, label + 1
 
 
-def k_mean(signal, class_num):
-    model = KMeans(n_clusters=5)
-    # 将数据代入到聚类模型中
-    model = model.fit(signal)
-    color_map = [[i, j] for i in range(256) for j in range(256)]
-    model.predict(color_map)
-    color_dict = dict([(k,v) for k,v in zip(color_map)])
-
-
 print("开始统计颜色信号...")
 signal_cache_a = np.zeros(255)
 signal_cache_b = np.zeros(255)
@@ -77,13 +68,11 @@ signal_cache_b = signal_cache_b / img_num * 1000000
 a_step = np.sum(signal_cache_a) / BLOCK_SIZE1D
 b_step = np.sum(signal_cache_b) / BLOCK_SIZE1D
 
-mode = input("选择生成模式1或2_")
-if mode == 1:
-    a_dict, al_dict, a_num = analysis1d(signal_cache_a, a_step)
-    b_dict, bl_dict, b_num = analysis1d(signal_cache_b, b_step)
-    print("写入硬盘...")
-    with open("./Color.dict", "w", encoding="utf-8")as f:
-        f.write(str([[a_dict, b_dict], [al_dict, bl_dict]]))
-    print("已保存至./Color1D.dict \n分类数为:", a_num * b_num, "\tA:", a_num, "\tB:", b_num)
-else:
-    pass
+print("正在生成字典...")
+
+a_dict, al_dict, a_num = analysis1d(signal_cache_a, a_step)
+b_dict, bl_dict, b_num = analysis1d(signal_cache_b, b_step)
+print("写入硬盘...")
+with open("./Color.dict", "w", encoding="utf-8")as f:
+    f.write(str([[a_dict, b_dict], [al_dict, bl_dict]]))
+print("已保存至./Color1D.dict \n分类数为:", a_num * b_num, "\tA:", a_num, "\tB:", b_num)
