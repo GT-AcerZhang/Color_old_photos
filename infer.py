@@ -7,15 +7,24 @@ import cv2 as cv
 import paddle.fluid as fluid
 
 from data_reader import reader
-from cvt_image_data import cvt_color
 
 TEST_DATA_PATH = "./data/val"
 MODEL_DIR = "./best_model.color"
 DICT_PATH = "./Color.dict"
+IM_SIZE = [256] * 2
+
+
+def cvt_color(ipt, c_map):
+    f_a = np.zeros_like(ipt)
+    f_b = np.zeros_like(ipt)
+    for x in range(IM_SIZE[0]):
+        for y in range(IM_SIZE[1]):
+            f_a[x][y], f_b[x][y] = c_map[ipt[x][y]]
+    return f_a, f_b
+
 
 with open(DICT_PATH, "r", encoding="utf-8") as f:
-    a_dict, b_dict = eval(f.read())[1]
-IM_SIZE = [256] * 2
+    color_map = eval(f.read())[1]
 
 place = fluid.CPUPlace()
 exe = fluid.Executor(place)
@@ -34,15 +43,13 @@ for data in infer_reader():
     ipt_w = [i[3] for i in data]
     out = exe.run(program, feeder.feed(ipt_data), fetch_list=target_list)
     for img_h, img_w, img_l, img_ab in zip(ipt_h, ipt_w, ipt_l, out[0]):
-        img_ab = img_ab.reshape((2, IM_SIZE[0], IM_SIZE[1])).transpose(1, 2, 0)
-        img_a, img_b = cv.split(img_ab.astype("uint8"))  # !
-        img_a = cvt_color(img_a, a_dict)
-        img_b = cvt_color(img_b, b_dict)
+        img_ab = img_ab.reshape((IM_SIZE[0], IM_SIZE[1]))*300
+        img_a, img_b = cvt_color(img_ab.astype("uint8"), color_map)
         img_a_r = cv.resize(img_a.astype("uint8"), (img_w, img_h))
         img_b_r = cv.resize(img_b.astype("uint8"), (img_w, img_h))
         img = cv.merge([img_l, img_a_r, img_b_r])
         im = cv.cvtColor(img, cv.COLOR_LAB2BGR)
-        im = cv.resize(im, (img_w, img_h))
+        # im = cv.resize(im, (img_w, img_h))
         cv.imshow("Result", im)
         cv.imwrite("result.jpg", im)
         cv.waitKey()
