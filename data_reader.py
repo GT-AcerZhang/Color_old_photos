@@ -1,7 +1,3 @@
-# Author: Acer Zhang
-# Datetime:2020/7/6 19:37
-# Copyright belongs to the author.
-# Please indicate the source for reprinting.
 import os
 
 import numpy as np

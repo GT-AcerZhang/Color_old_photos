@@ -6,13 +6,12 @@ import os
 
 import numpy as np
 import cv2 as cv
-from sklearn.cluster import KMeans
 
-BLOCK_SIZE1D = 60  # 1D细分类块大小，越大分类数越高，效果越好 - 模型大小会增加
+BLOCK_SIZE1D = 80  # 1D细分类块大小，越大分类数越高，效果越好 - 模型大小会增加
 MAX_STEP = 10  # 最大步长，越低效果越好
 IMG_BLOCK = 5000  # 图片采样数，越高越好 - 统计速度变慢
 R_IMG_SIZE = (512, 512)  # 采样分辨率，越高越好 - 可能出现爆炸现象
-IMAGE_DIR_PATH = "val2017"
+IMAGE_DIR_PATH = "data/out_put"
 
 
 def analysis1d(signal, step):
@@ -28,13 +27,13 @@ def analysis1d(signal, step):
     block_list = dict()
     color_list = dict()
     while True:
-        if (label == BLOCK_SIZE1D - 2 and start - end <= MAX_STEP) or end == 255:
+        if (label == BLOCK_SIZE1D - 2 and end - start <= MAX_STEP) or end == 255:
             block_list.update(dict([(k, label) for k in range(start, 255)]))
-            color_list[label] = np.max(signal[start:255]).astype("uint8") + start
+            color_list[label] = start + int((np.max(signal[start:256]).astype("uint8") + (end - start)) * 0.5)
             break
-        elif np.sum(signal[start:end]) >= int(step) or start - end >= MAX_STEP:
+        elif np.sum(signal[start:end]) >= int(step) or end - start >= MAX_STEP:
             block_list.update(dict([(k, label) for k in range(start, end)]))
-            color_list[label] = np.argmax(signal[start:end]).astype("uint8") + start
+            color_list[label] = start + int((np.argmax(signal[start:end]).astype("uint8") + (end - start)) * 0.5)
             start = end
             end += 1
             label += 1
@@ -44,11 +43,11 @@ def analysis1d(signal, step):
 
 
 print("开始统计颜色信号...")
-signal_cache_a = np.zeros(255)
-signal_cache_b = np.zeros(255)
+signal_cache_a = np.zeros(256)
+signal_cache_b = np.zeros(256)
 img_num = 0
 for file_id, file in enumerate(os.listdir(IMAGE_DIR_PATH)):
-    if file_id == IMG_BLOCK:
+    if file_id == IMG_BLOCK or (".jpg" and ".bmp") not in file:
         break
     img = cv.imread(os.path.join(IMAGE_DIR_PATH, file))
     img = cv.resize(img, R_IMG_SIZE)
@@ -56,9 +55,9 @@ for file_id, file in enumerate(os.listdir(IMAGE_DIR_PATH)):
     im_l, im_a, im_b = cv.split(img)
     a = np.array(im_a).flatten()
     b = np.array(im_b).flatten()
-    h_a = np.histogram(a, 255, range=(0, 255))[0].astype("float32")
+    h_a = np.histogram(a, 256, range=(0, 256))[0].astype("float32")
     signal_cache_a += h_a / 1000000
-    h_b = np.histogram(b, 255, range=(0, 255))[0].astype("float32")
+    h_b = np.histogram(b, 256, range=(0, 256))[0].astype("float32")
     signal_cache_b += h_b / 1000000
     img_num = file_id
 img_num += 1
@@ -73,6 +72,6 @@ print("正在生成字典...")
 a_dict, al_dict, a_num = analysis1d(signal_cache_a, a_step)
 b_dict, bl_dict, b_num = analysis1d(signal_cache_b, b_step)
 print("写入硬盘...")
-with open("./Color.dict", "w", encoding="utf-8")as f:
+with open("./Color1D.dict", "w", encoding="utf-8")as f:
     f.write(str([[a_dict, b_dict], [al_dict, bl_dict]]))
 print("已保存至./Color1D.dict \n分类数为:", a_num * b_num, "\tA:", a_num, "\tB:", b_num)

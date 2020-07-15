@@ -16,18 +16,17 @@ LOAD_PER_MODEL = False
 
 TRAIN_DATA_PATH = "./data/train"
 TEST_DATA_PATH = "./data/test"
-CHECK_POINT_DIR = "./check_model.color"
+CHECK_POINT_DIR = "./check_point/check_model.color"
 PER_MODEL_DIR = "./data/unet_coco_v3"
 MODEL_DIR = "./best_model.color"
 
-
-EPOCH = 5
-BATCH_SIZE = 8
+EPOCH = 500
+BATCH_SIZE = 32
 IM_SIZE = [256] * 2
-SIGNAL_A_NUM = 17
-SIGNAL_B_NUM = 20
+SIGNAL_A_NUM = 43
+SIGNAL_B_NUM = 54
 
-BOUNDARIES = [1000, 2000, 5000, 10000]
+BOUNDARIES = [1000, 5000, 15000, 100000]
 VALUES = [0.005, 0.001, 0.0005, 0.0001, 0.00005]
 WARM_UP_STEPS = 150
 START_LR = 0.005
@@ -41,45 +40,47 @@ train_program = fluid.Program()
 start_program = fluid.Program()
 
 with fluid.program_guard(train_program, start_program):
-    img_a = fluid.data(name="img_a", shape=[-1, 1] + IM_SIZE)
+    img_l = fluid.data(name="img_l", shape=[-1, 1] + IM_SIZE)
     label_a = fluid.data(name="label_a", shape=[-1, 1] + IM_SIZE, dtype="int64")
     label_b = fluid.data(name="label_b", shape=[-1, 1] + IM_SIZE, dtype="int64")
-
-    encode_data, short_cuts = encode(img_a)
+    # w_a = fluid.data(name="w_a", shape=[-1, 256])
+    # w_b = fluid.data(name="w_b", shape=[-1, 256])
     with scope("signal_a"):
+        encode_data, short_cuts = encode(img_l)
         decode_a = decode(encode_data, short_cuts)
         signal_a = get_logit(decode_a, SIGNAL_A_NUM)
     with scope("signal_b"):
+        encode_data, short_cuts = encode(img_l)
         decode_b = decode(encode_data, short_cuts)
         signal_b = get_logit(decode_b, SIGNAL_B_NUM)
-    clip = fluid.clip.GradientClipByGlobalNorm(clip_norm=1.0)
-    cost_a = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
-    cost_b = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
-    cost = cost_a + cost_b
+    cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
+    cost_b_o = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
+    cost = cost_a_o + cost_b_o
     loss = fluid.layers.mean(cost)
     test_program = train_program.clone(for_test=True)
-
     signal_a_out = fluid.layers.argmax(x=signal_a, axis=1)
     signal_b_out = fluid.layers.argmax(x=signal_b, axis=1)
     signal_sum = fluid.layers.concat([signal_a_out, signal_b_out], 1)
+
     learning_rate = fluid.layers.piecewise_decay(boundaries=BOUNDARIES, values=VALUES)
     decayed_lr = fluid.layers.linear_lr_warmup(learning_rate,
                                                WARM_UP_STEPS,
                                                START_LR,
                                                END_LR)
-    opt = fluid.optimizer.Adamax(decayed_lr, grad_clip=clip)
+    opt = fluid.optimizer.Adam(decayed_lr)
     opt.minimize(loss)
 
 train_reader = fluid.io.batch(
-    reader=fluid.io.shuffle(reader(TRAIN_DATA_PATH), buf_size=4096),
+    reader=fluid.io.shuffle(reader(TRAIN_DATA_PATH, im_size=IM_SIZE), buf_size=4096),
     batch_size=BATCH_SIZE)
 test_reader = fluid.io.batch(
-    reader=reader(TEST_DATA_PATH),
+    reader=reader(TEST_DATA_PATH, im_size=IM_SIZE),
     batch_size=BATCH_SIZE * 2)
 
-feeder = fluid.DataFeeder(place=place, feed_list=["img_a", "label_a", "label_b"], program=train_program)
+feeder = fluid.DataFeeder(place=place, feed_list=["img_l", "label_a", "label_b"], program=train_program)
 
 exe.run(start_program)
+print("Net check --OK")
 if os.path.exists(CHECK_POINT_DIR + ".pdopt") and LOAD_CHECKPOINT:
     fluid.io.load(train_program, CHECK_POINT_DIR, exe)
 
@@ -112,18 +113,17 @@ for epoch in range(EPOCH):
                   "\tLR:", lr)
             out_loss = list()
         if data_id % 100 == 0:
-            out_loss = list()
-            for data in test_reader():
+            out_loss_t = list()
+            for data_t in test_reader():
                 out = exe.run(program=test_program,
-                              feed=feeder.feed(data),
+                              feed=feeder.feed(data_t),
                               fetch_list=[loss])
-                out_loss.append(out[0][0])
-            test_loss = sum(out_loss) / len(out_loss)
-            out_loss = list()
+                out_loss_t.append(out[0][0])
+            test_loss = sum(out_loss_t) / len(out_loss_t)
             if test_loss <= MIN_LOSS:
                 MIN_LOSS = test_loss
                 fluid.io.save_inference_model(dirname=MODEL_DIR,
-                                              feeded_var_names=["img_a"],
+                                              feeded_var_names=["img_l"],
                                               target_vars=[signal_sum],
                                               executor=exe,
                                               main_program=train_program)
