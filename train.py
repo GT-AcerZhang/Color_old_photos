@@ -43,8 +43,8 @@ with fluid.program_guard(train_program, start_program):
     img_l = fluid.data(name="img_l", shape=[-1, 1] + IM_SIZE)
     label_a = fluid.data(name="label_a", shape=[-1, 1] + IM_SIZE, dtype="int64")
     label_b = fluid.data(name="label_b", shape=[-1, 1] + IM_SIZE, dtype="int64")
-    # w_a = fluid.data(name="w_a", shape=[-1, 256])
-    # w_b = fluid.data(name="w_b", shape=[-1, 256])
+    w_a = fluid.data(name="w_a", shape=[-1] + IM_SIZE)
+    w_b = fluid.data(name="w_b", shape=[-1] + IM_SIZE)
     with scope("signal_a"):
         encode_data, short_cuts = encode(img_l)
         decode_a = decode(encode_data, short_cuts)
@@ -57,10 +57,16 @@ with fluid.program_guard(train_program, start_program):
     cost_b_o = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
     cost = cost_a_o + cost_b_o
     loss = fluid.layers.mean(cost)
+
     test_program = train_program.clone(for_test=True)
     signal_a_out = fluid.layers.argmax(x=signal_a, axis=1)
     signal_b_out = fluid.layers.argmax(x=signal_b, axis=1)
     signal_sum = fluid.layers.concat([signal_a_out, signal_b_out], 1)
+
+    cost_a = fluid.layers.elementwise_mul(cost_a_o, w_a)
+    cost_b = fluid.layers.elementwise_mul(cost_b_o, w_b)
+    cost_final = cost_a + cost_b
+    loss_final = fluid.layers.mean(cost_final)
 
     learning_rate = fluid.layers.piecewise_decay(boundaries=BOUNDARIES, values=VALUES)
     decayed_lr = fluid.layers.linear_lr_warmup(learning_rate,
@@ -68,7 +74,7 @@ with fluid.program_guard(train_program, start_program):
                                                START_LR,
                                                END_LR)
     opt = fluid.optimizer.Adam(decayed_lr)
-    opt.minimize(loss)
+    opt.minimize(loss_final)
 
 train_reader = fluid.io.batch(
     reader=fluid.io.shuffle(reader(TRAIN_DATA_PATH, im_size=IM_SIZE), buf_size=4096),
@@ -77,7 +83,7 @@ test_reader = fluid.io.batch(
     reader=reader(TEST_DATA_PATH, im_size=IM_SIZE),
     batch_size=BATCH_SIZE * 2)
 
-feeder = fluid.DataFeeder(place=place, feed_list=["img_l", "label_a", "label_b"], program=train_program)
+feeder = fluid.DataFeeder(place=place, feed_list=["img_l", "label_a", "label_b","w_a","w_b"], program=train_program)
 
 exe.run(start_program)
 print("Net check --OK")
