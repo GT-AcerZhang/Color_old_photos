@@ -7,8 +7,9 @@ import os
 import numpy as np
 import cv2 as cv
 
-BLOCK_SIZE1D = 80  # 1D细分类块大小，越大分类数越高，效果越好 - 模型大小会增加
-MAX_STEP = 10  # 最大步长，越低效果越好
+BLOCK_SIZE1D = 30  # 1D细分类块大小，越大分类数越高，效果越好 - 模型大小会增加
+MAX_STEP = 15  # 最大步长，越低效果越好
+MIN_STEP = 5  # 最低步长
 IMG_BLOCK = 5000  # 图片采样数，越高越好 - 统计速度变慢
 R_IMG_SIZE = (512, 512)  # 采样分辨率，越高越好 - 可能出现爆炸现象
 IMAGE_DIR_PATH = "data/out_put"
@@ -35,7 +36,7 @@ def analysis1d(signal, step):
             block_list.update(dict([(k, label) for k in range(start, end)]))
             color_list[label] = start + int((np.argmax(signal[start:end]).astype("uint8") + (end - start)) * 0.5)
             start = end
-            end += 1
+            end += MIN_STEP
             label += 1
         else:
             end += 1

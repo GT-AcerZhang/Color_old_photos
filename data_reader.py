@@ -27,7 +27,7 @@ def req_weight(im, color_map):
 
 
 def reader(data_path, is_val: bool = False, im_size: list = None):
-    file_names = os.listdir(data_path)
+    file_names = os.listdir(os.path.join(data_path, "label")) if not is_val else os.listdir(data_path)
 
     def _reader():
         for file_name in file_names:
@@ -40,10 +40,12 @@ def reader(data_path, is_val: bool = False, im_size: list = None):
                     ori_l = np.array(ori_img).reshape((ori_h, ori_w)).astype("uint8")
                     yield im_l / 255, ori_l, ori_h, ori_w
                 else:
-                    ori_img = np.load(os.path.join(data_path, file_name))
+                    label_l = np.load(os.path.join(data_path, "label", file_name))
+                    ori_img = np.load(os.path.join(data_path, "lab", file_name))
                     ori_h, ori_w = ori_img.shape[:-1]
                     ori_img = np.array(ori_img).transpose([2, 0, 1])
                     l, a, b = ori_img[0, :, :], ori_img[1, :, :], ori_img[2, :, :]
+                    o_im_l = np.array(label_l).reshape((1, 1, label_l.shape[0], label_l.shape[1])).astype("float32")
                     im_l = np.array(l).reshape((1, 1, ori_h, ori_w)).astype("float32")
                     im_a = np.array(a).reshape((1, 1, ori_h, ori_w)).astype("int64")
                     im_b = np.array(b).reshape((1, 1, ori_h, ori_w)).astype("int64")
@@ -51,7 +53,7 @@ def reader(data_path, is_val: bool = False, im_size: list = None):
                     b_color_map = req_color_map(im_b)
                     a_w = req_weight(im_a, a_color_map)
                     b_w = req_weight(im_b, b_color_map)
-                    yield im_l / 255, im_a, im_b, a_w, b_w
+                    yield im_l / 255, o_im_l / 255, im_a, im_b, a_w, b_w
             except Exception as e:
                 print(e)
 

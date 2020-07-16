@@ -29,18 +29,20 @@ feeder = fluid.DataFeeder(place=place, feed_list=feed_list, program=program)
 
 for data in infer_reader():
     ipt_data = [i[0] for i in data]
-    ipt_l = [i[1] for i in data]
+    # ipt_l = [i[1] for i in data]
     ipt_h = [i[2] for i in data]
     ipt_w = [i[3] for i in data]
     out = exe.run(program, feeder.feed(ipt_data), fetch_list=target_list)
-    for img_h, img_w, img_l, img_ab in zip(ipt_h, ipt_w, ipt_l, out[0]):
+    for img_h, img_w, img_ab, img_rl in zip(ipt_h, ipt_w, out[0], out[1]):
         img_a_b = img_ab.reshape((2, IM_SIZE[0], IM_SIZE[1])).transpose(1, 2, 0).astype("uint8")
+        img_l = img_rl.reshape((IM_SIZE[0] * 2, IM_SIZE[1] * 2)) * 255
+        img_l = cv.resize(img_l, (img_w * 2, img_h * 2))
         img_a, img_b = cv.split(img_a_b)
         img_a = cvt_color(img_a, a_dict)
         img_b = cvt_color(img_b, b_dict)
-        img_a_r = cv.resize(img_a, (img_w, img_h), interpolation=cv.INTER_NEAREST)
-        img_b_r = cv.resize(img_b, (img_w, img_h), interpolation=cv.INTER_NEAREST)
-        img = cv.merge([img_l, img_a_r, img_b_r])
+        img_a_r = cv.resize(img_a, (img_w * 2, img_h * 2))
+        img_b_r = cv.resize(img_b, (img_w * 2, img_h * 2))
+        img = cv.merge([img_l.astype("uint8"), img_a_r, img_b_r])
         im = cv.cvtColor(img, cv.COLOR_LAB2BGR)
         im = cv.resize(im, (img_w, img_h))
         plt.imshow(im)
