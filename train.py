@@ -94,17 +94,18 @@ with fluid.program_guard(train_program, start_program):
     final_loss = loss_l + loss_a + loss_b
     opt.minimize(final_loss)
 
-
 train_loader = fluid.io.DataLoader.from_generator(feed_list=[img_l, o_img_l, label_a, label_b, w_a, w_b],
                                                   capacity=64,
                                                   iterable=True,
-                                                  use_double_buffer=True)
-train_loader.set_batch_generator(reader(TRAIN_DATA_PATH, im_size=IM_SIZE), places=place)
+                                                  use_double_buffer=True,
+                                                  drop_last=True)
+train_loader.set_sample_generator(reader(TRAIN_DATA_PATH, im_size=IM_SIZE), BATCH_SIZE, drop_last=True, places=place)
 test_loader = fluid.io.DataLoader.from_generator(feed_list=[img_l, o_img_l, label_a, label_b, w_a, w_b],
                                                  capacity=32,
                                                  iterable=True,
-                                                 use_double_buffer=True)
-test_loader.set_batch_generator(reader(TEST_DATA_PATH, im_size=IM_SIZE), places=place)
+                                                 use_double_buffer=True,
+                                                 drop_last=True)
+test_loader.set_sample_generator(reader(TEST_DATA_PATH, im_size=IM_SIZE), BATCH_SIZE, drop_last=True, places=place)
 
 exe.run(start_program)
 

@@ -61,6 +61,8 @@ def reader(data_path, is_val: bool = False, im_size: list = None):
                     ori_l = cv.split(ori_img)[0]
                     re_img = cv.resize(ori_img, (im_size[0], im_size[1]))
                     r_l, r_a, r_b = cvt_process(re_img, c_dict)
+                    if np.sum(r_l) < np.sum(r_b):
+                        continue
                     ori_l = np.array(ori_l).reshape((1, 1, im_size[0] * 2, im_size[1] * 2)).astype("float32")
                     a_w = req_weight(r_a)
                     b_w = req_weight(r_b)
