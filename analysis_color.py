@@ -29,7 +29,7 @@ def analysis1d(signal, step):
     color_list = dict()
     while True:
         if (label == BLOCK_SIZE1D - 2 and end - start <= MAX_STEP) or end == 255:
-            block_list.update(dict([(k, label) for k in range(start, 255)]))
+            block_list.update(dict([(k, label) for k in range(start, 256)]))
             color_list[label] = int((np.max(signal[start:256]).astype("uint8") + (end - start)) * 0.5)
             break
         elif np.sum(signal[start:end]) >= int(step) or end - start >= MAX_STEP:

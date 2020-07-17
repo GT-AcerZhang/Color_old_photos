@@ -10,10 +10,10 @@ import paddle.fluid as fluid
 from models.libs.model_libs import scope
 from models.modeling.unet import encode, decode, get_logit, deconv, double_conv
 from data_reader import reader
-from net import get_net, up
 
 LOAD_CHECKPOINT = False
 LOAD_PER_MODEL = False
+GPU_NUM = 8
 
 TRAIN_DATA_PATH = "./data/train"
 TEST_DATA_PATH = "./data/test"
@@ -21,12 +21,12 @@ CHECK_POINT_DIR = "./check_point/check_model.color"
 PER_MODEL_DIR = "./data/unet_coco_v3"
 MODEL_DIR = "./best_model.color"
 
-EPOCH = 500
+EPOCH = 100
 BATCH_SIZE = 8
 IM_SIZE = [256] * 2
 OUT_IM_SIZE = [IM_SIZE[0] * 2, IM_SIZE[1] * 2]
-SIGNAL_A_NUM = 14
-SIGNAL_B_NUM = 14
+SIGNAL_A_NUM = 21
+SIGNAL_B_NUM = 23
 
 BOUNDARIES = [1000, 5000, 15000, 100000]
 VALUES = [0.005, 0.001, 0.0005, 0.0001, 0.00005]
@@ -34,8 +34,9 @@ WARM_UP_STEPS = 150
 START_LR = 0.005
 END_LR = 0.01
 
-place = fluid.CUDAPlace(0)
-# place = fluid.CPUPlace()
+parallel_places = [fluid.CUDAPlace(i) for i in range(GPU_NUM)]
+# place = fluid.CUDAPlace(0)
+place = parallel_places[0]
 exe = fluid.Executor(place)
 
 train_program = fluid.Program()
@@ -90,21 +91,27 @@ with fluid.program_guard(train_program, start_program):
                                                START_LR,
                                                END_LR)
     opt = fluid.optimizer.Adam(decayed_lr)
-    opt.minimize(loss_l)
-    opt.minimize(loss_a)
-    opt.minimize(loss_b)
+    final_loss = loss_l + loss_a + loss_b
+    opt.minimize(final_loss)
 
-train_reader = fluid.io.batch(
-    reader=fluid.io.shuffle(reader(TRAIN_DATA_PATH, im_size=IM_SIZE), buf_size=4096),
-    batch_size=BATCH_SIZE)
-test_reader = fluid.io.batch(
-    reader=reader(TEST_DATA_PATH, im_size=IM_SIZE),
-    batch_size=BATCH_SIZE * 2)
 
-feeder = fluid.DataFeeder(place=place, feed_list=["img_l", "o_img_l", "label_a", "label_b", "w_a", "w_b"],
-                          program=train_program)
+train_loader = fluid.io.DataLoader.from_generator(feed_list=[img_l, o_img_l, label_a, label_b, w_a, w_b],
+                                                  capacity=64,
+                                                  iterable=True,
+                                                  use_double_buffer=True)
+train_loader.set_batch_generator(reader(TRAIN_DATA_PATH, im_size=IM_SIZE), places=place)
+test_loader = fluid.io.DataLoader.from_generator(feed_list=[img_l, o_img_l, label_a, label_b, w_a, w_b],
+                                                 capacity=32,
+                                                 iterable=True,
+                                                 use_double_buffer=True)
+test_loader.set_batch_generator(reader(TEST_DATA_PATH, im_size=IM_SIZE), places=place)
 
 exe.run(start_program)
+
+compiled_train_prog = fluid.CompiledProgram(train_program).with_data_parallel(loss_name=final_loss.name,
+                                                                              places=parallel_places)
+compiled_test_prog = fluid.CompiledProgram(test_program).with_data_parallel(share_vars_from=compiled_train_prog,
+                                                                            places=parallel_places)
 print("Net check --OK")
 if os.path.exists(CHECK_POINT_DIR + ".pdopt") and LOAD_CHECKPOINT:
     fluid.io.load(train_program, CHECK_POINT_DIR, exe)
@@ -122,16 +129,16 @@ for epoch in range(EPOCH):
     out_loss_ab = list()
     out_loss_l = list()
     lr = None
-    for data_id, data in enumerate(train_reader()):
+    for data_id, data in enumerate(train_loader()):
         start_time = time.time()
-        out = exe.run(program=train_program,
-                      feed=feeder.feed(data),
+        out = exe.run(program=compiled_train_prog,
+                      feed=data,
                       fetch_list=[loss, loss_l, decayed_lr])
         out_loss_ab.append(out[0][0])
         out_loss_l.append(out[1][0])
         lr = out[2]
         cost_time = time.time() - start_time
-        if data_id % (320 // BATCH_SIZE) == 0:
+        if data_id % (320 // BATCH_SIZE) == (320 // BATCH_SIZE) - 1:
             print(epoch,
                   "-",
                   data_id,
@@ -141,12 +148,12 @@ for epoch in range(EPOCH):
                   "\tLR:", lr)
             out_loss_ab = []
             out_loss_l = []
-        if data_id % (3200 // BATCH_SIZE) == 1:
+        if data_id % (3200 // BATCH_SIZE) == (3200 // BATCH_SIZE) - 1:
             out_loss_ab = []
             out_loss_l = []
-            for data_t in test_reader():
-                out = exe.run(program=test_program,
-                              feed=feeder.feed(data_t),
+            for data_t in test_loader:
+                out = exe.run(program=compiled_test_prog,
+                              feed=data_t,
                               fetch_list=[loss, loss_l])
                 out_loss_ab.append(out[0][0])
                 out_loss_l.append(out[1][0])
@@ -161,5 +168,5 @@ for epoch in range(EPOCH):
             fluid.io.save(train_program, CHECK_POINT_DIR)
             print(epoch,
                   "TEST:\t{:.6f}".format(sum(out_loss_ab) / len(out_loss_ab)),
-                  "L_Loss:{:.6f}".format(sum(out_loss_l) / len(out_loss_l)),
+                  "L_Loss:{:.8f}".format(sum(out_loss_l) / len(out_loss_l)),
                   "\tMIN LOSS:\t{:.4f}".format(MIN_LOSS))
