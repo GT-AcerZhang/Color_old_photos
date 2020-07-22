@@ -8,7 +8,7 @@ import time
 import paddle.fluid as fluid
 
 from models.libs.model_libs import scope
-from models.modeling.unet import encode, decode, get_logit, deconv, double_conv
+from models.modeling.unet import unet
 from data_reader import reader
 
 LOAD_CHECKPOINT = False
@@ -51,11 +51,11 @@ with fluid.program_guard(train_program, start_program):
     w_b = fluid.data(name="w_b", shape=[-1] + IM_SIZE)
 
     with scope("signal_l"):
-        signal_l = get_logit(img_l, 1)
+        signal_l = unet(img_l, 1)
     with scope("signal_a"):
-        signal_a = get_logit(img_l, SIGNAL_A_NUM)
+        signal_a = unet(img_l, SIGNAL_A_NUM)
     with scope("signal_b"):
-        signal_b = get_logit(img_l, SIGNAL_B_NUM)
+        signal_b = unet(img_l, SIGNAL_B_NUM)
 
     loss_l = fluid.layers.mse_loss(signal_l, o_img_l)
     # loss_l = fluid.layers.mean(cost_l)
