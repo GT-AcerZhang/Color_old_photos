@@ -13,7 +13,7 @@ from data_reader import reader
 
 LOAD_CHECKPOINT = False
 LOAD_PER_MODEL = False
-GPU_NUM = 8
+GPU_NUM = 1
 
 TRAIN_DATA_PATH = "./data/train"
 TEST_DATA_PATH = "./data/test"
@@ -44,31 +44,21 @@ start_program = fluid.Program()
 
 with fluid.program_guard(train_program, start_program):
     img_l = fluid.data(name="img_l", shape=[-1, 1] + IM_SIZE)
-    o_img_l = fluid.data(name="o_img_l", shape=[-1, 1] + OUT_IM_SIZE)
+    o_img_l = fluid.data(name="o_img_l", shape=[-1, 1] + IM_SIZE)
     label_a = fluid.data(name="label_a", shape=[-1, 1] + IM_SIZE, dtype="int64")
     label_b = fluid.data(name="label_b", shape=[-1, 1] + IM_SIZE, dtype="int64")
     w_a = fluid.data(name="w_a", shape=[-1] + IM_SIZE)
     w_b = fluid.data(name="w_b", shape=[-1] + IM_SIZE)
-    with scope("signal_l"):
-        encode_data, short_cuts = encode(img_l)
-        decode_l = decode(encode_data, short_cuts)
-        data = deconv(decode_l,
-                      64,
-                      filter_size=2,
-                      stride=2,
-                      padding=0)
-        signal_l = double_conv(data, 1)
-    with scope("signal_a"):
-        encode_data, short_cuts = encode(img_l)
-        decode_a = decode(encode_data, short_cuts)
-        signal_a = get_logit(decode_a, SIGNAL_A_NUM)
-    with scope("signal_b"):
-        encode_data, short_cuts = encode(img_l)
-        decode_b = decode(encode_data, short_cuts)
-        signal_b = get_logit(decode_b, SIGNAL_B_NUM)
 
-    cost_l = fluid.layers.square_error_cost(signal_l, o_img_l)
-    loss_l = fluid.layers.mean(cost_l)
+    with scope("signal_l"):
+        signal_l = get_logit(img_l, 1)
+    with scope("signal_a"):
+        signal_a = get_logit(img_l, SIGNAL_A_NUM)
+    with scope("signal_b"):
+        signal_b = get_logit(img_l, SIGNAL_B_NUM)
+
+    loss_l = fluid.layers.mse_loss(signal_l, o_img_l)
+    # loss_l = fluid.layers.mean(cost_l)
 
     cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
     cost_b_o = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
@@ -78,12 +68,11 @@ with fluid.program_guard(train_program, start_program):
     test_program = train_program.clone(for_test=True)
     signal_a_out = fluid.layers.argmax(x=signal_a, axis=1)
     signal_b_out = fluid.layers.argmax(x=signal_b, axis=1)
-    signal_sum = fluid.layers.concat([signal_a_out, signal_b_out], 1)
 
-    cost_a = fluid.layers.elementwise_mul(cost_a_o, w_a)
-    cost_b = fluid.layers.elementwise_mul(cost_b_o, w_b)
-    loss_a = fluid.layers.mean(cost_a)
-    loss_b = fluid.layers.mean(cost_b)
+    # cost_a = fluid.layers.elementwise_mul(cost_a_o, w_a)
+    # cost_b = fluid.layers.elementwise_mul(cost_b_o, w_b)
+    # loss_a = fluid.layers.mean(cost_a)
+    # loss_b = fluid.layers.mean(cost_b)
 
     learning_rate = fluid.layers.piecewise_decay(boundaries=BOUNDARIES, values=VALUES)
     decayed_lr = fluid.layers.linear_lr_warmup(learning_rate,
@@ -91,17 +80,18 @@ with fluid.program_guard(train_program, start_program):
                                                START_LR,
                                                END_LR)
     opt = fluid.optimizer.Adam(decayed_lr)
-    final_loss = loss_l + loss_a + loss_b
-    opt.minimize(final_loss)
+    opt.minimize(loss_l)
+    opt.minimize(loss)
+    final_loss = loss_l + loss
 
 train_loader = fluid.io.DataLoader.from_generator(feed_list=[img_l, o_img_l, label_a, label_b, w_a, w_b],
-                                                  capacity=64,
+                                                  capacity=16,
                                                   iterable=True,
                                                   use_double_buffer=True,
                                                   drop_last=True)
 train_loader.set_sample_generator(reader(TRAIN_DATA_PATH, im_size=IM_SIZE), BATCH_SIZE, drop_last=True, places=place)
 test_loader = fluid.io.DataLoader.from_generator(feed_list=[img_l, o_img_l, label_a, label_b, w_a, w_b],
-                                                 capacity=32,
+                                                 capacity=8,
                                                  iterable=True,
                                                  use_double_buffer=True,
                                                  drop_last=True)
@@ -149,7 +139,8 @@ for epoch in range(EPOCH):
                   "\tLR:", lr)
             out_loss_ab = []
             out_loss_l = []
-        if data_id % (3200 // BATCH_SIZE) == (3200 // BATCH_SIZE) - 1:
+        fluid.io.save(train_program, CHECK_POINT_DIR)
+        if data_id % (6400 // BATCH_SIZE) == (6400 // BATCH_SIZE) - 1:
             out_loss_ab = []
             out_loss_l = []
             for data_t in test_loader:
@@ -163,10 +154,10 @@ for epoch in range(EPOCH):
                 MIN_LOSS = test_loss
                 fluid.io.save_inference_model(dirname=MODEL_DIR,
                                               feeded_var_names=["img_l"],
-                                              target_vars=[signal_sum, signal_l],
+                                              target_vars=[signal_l, signal_a_out, signal_b_out],
                                               executor=exe,
                                               main_program=train_program)
-            fluid.io.save(train_program, CHECK_POINT_DIR)
+
             print(epoch,
                   "TEST:\t{:.6f}".format(sum(out_loss_ab) / len(out_loss_ab)),
                   "L_Loss:{:.8f}".format(sum(out_loss_l) / len(out_loss_l)),

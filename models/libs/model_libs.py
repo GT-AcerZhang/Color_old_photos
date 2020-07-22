@@ -118,8 +118,7 @@ def conv(*args, **kargs):
     if 'bias_attr' in kargs and kargs['bias_attr']:
         kargs['bias_attr'] = fluid.ParamAttr(
             name=name_scope + 'biases',
-            regularizer=None,
-            initializer=fluid.initializer.ConstantInitializer(value=0.0))
+            regularizer=None)
     else:
         kargs['bias_attr'] = False
     return fluid.layers.conv2d(*args, **kargs)
