@@ -1,19 +1,34 @@
 import os
-import traceback
 import random
 
 import paddle.fluid as fluid
 import numpy as np
 import cv2 as cv
 
-CPU_NUM = 4
-GPU_NUM = 8
-DICT_FILE_PATH = "./color_files/Color1D_Base_v2.dict"
+CPU_NUM = 4  # CPU 队列数 不推荐过高
+MAX_BATCH_SIZE = 3  # BATCH SIZE 阈值
+MEMORY_CAPACITY = 15.9  # 硬件会保留部分显存，此处为可用内存大小，单位GB
+DICT_FILE_PATH = "./color_files/Color1D_Base_v2.dict"  # 颜色空间文件
+
+# 读取颜色空间字典
 with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
     c_dict = eval(f.read())[0]
 
+# 判断Mini Batch数据大小以及图片缩放系数
+if MEMORY_CAPACITY // 16 == 0:
+    SAMPLE_NUM = 1
+    RAM_SCALE = 0.9
+else:
+    SAMPLE_NUM = MEMORY_CAPACITY // 16
+    RAM_SCALE = 1.
+
 
 def check_gray(ipt):
+    """
+    检查是否为可疑的灰度图像
+    :param ipt: opencv图像对象
+    :return: 布尔判断结果
+    """
     img_hsv = cv.cvtColor(ipt, cv.COLOR_BGR2HSV)
     h, s, v = cv.split(img_hsv)
     s_w, s_h = s.shape[:2]
@@ -25,6 +40,12 @@ def check_gray(ipt):
 
 
 def cvt_color(ori_img, color_dict: dict):
+    """
+    颜色转换
+    :param ori_img: 待转换图像矩阵
+    :param color_dict: 颜色字典
+    :return: 转换后图像
+    """
     h, w = ori_img.shape
     for pix_h in range(h):
         for pix_w in range(w):
@@ -33,6 +54,12 @@ def cvt_color(ori_img, color_dict: dict):
 
 
 def cvt_process(ori_img, color_dict):
+    """
+    图片颜色空间压缩
+    :param ori_img: 待压缩图像矩阵
+    :param color_dict: 颜色字典
+    :return: L通道 压缩后A和B通道
+    """
     a_dict, b_dict = color_dict
     l, a, b = cv.split(ori_img)
     label_a = cvt_color(a, a_dict)
@@ -42,7 +69,8 @@ def cvt_process(ori_img, color_dict):
 
 def req_weight(im):
     """
-    获取权重
+    获取颜色权重
+    :return: 将颜色值转换为权重值，默认最低权重值为0.001
     """
     count = np.histogram(im, 256, range=(0, 256))[0].astype("float32")
     count[count == 0] = 1.
@@ -61,9 +89,9 @@ def make_train_data(sample):
     tmp_cvt_l = []
     tmp_cvt_a = []
     tmp_cvt_b = []
-    for _ in range(GPU_NUM):
+    for index in range(SAMPLE_NUM):
         # 原始图像随机尺寸缩放
-        r_ori_scale = random.uniform(0.25, 1.)
+        r_ori_scale = random.uniform(0.25, 0.9)
         r_scale = random.uniform(0.5, 0.8)
         sample_h, sample_w = sample.shape[:2]
         pre_done_img = cv.resize(sample, (
@@ -95,7 +123,12 @@ def make_train_data(sample):
     cvt_l = np.array(tmp_cvt_l).astype("float32")
     cvt_a = np.array(tmp_cvt_a).astype("int64")
     cvt_b = np.array(tmp_cvt_b).astype("int64")
-    return cvt_l_label / 255, cvt_l / 255, cvt_a, cvt_b
+    pack = []
+    for index in range(SAMPLE_NUM * 4):
+        if index == MAX_BATCH_SIZE:
+            break
+        pack.append((cvt_l_label[index] / 255, cvt_l[index] / 255, cvt_a[index], cvt_b[index]))
+    return pack
 
 
 def reader(data_path, is_val: bool = False, debug: bool = False):
@@ -117,10 +150,10 @@ def reader(data_path, is_val: bool = False, debug: bool = False):
                 else:
                     yield ori_img
 
-    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, 64)
+    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, CPU_NUM * 2)
 
 
 if __name__ == '__main__':
-    tmp = reader("./data/f", debug=True)
+    tmp = reader("data/f", debug=True)
     for i in tmp():
         print(1)

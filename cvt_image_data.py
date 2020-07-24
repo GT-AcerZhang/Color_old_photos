@@ -6,7 +6,7 @@ import cv2 as cv
 
 POOL_NUM = 4
 DICT_FILE_PATH = "./Color1D.dict"
-DATA_PATH = "./data/val"
+DATA_PATH = "data/f"
 OUT_PATH = "./data"
 IMG_RESIZE = (256, 256)
 TEST_MOD = 5

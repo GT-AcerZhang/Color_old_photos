@@ -23,8 +23,7 @@ CHECK_POINT_DIR = os.path.join(ROOT_PATH, "check_point/check_model.color")
 PER_MODEL_DIR = os.path.join(ROOT_PATH, "data/unet_coco_v3")
 MODEL_DIR = os.path.join(ROOT_PATH, "best_model.color")
 
-EPOCH = 5
-BATCH_SIZE = 4 * 8  # 与数据增强后分组大小一致
+EPOCH = 1
 SIGNAL_A_NUM = 19
 SIGNAL_B_NUM = 20
 
@@ -54,7 +53,6 @@ with fluid.program_guard(train_program, start_program):
     # 获得shape参数
     im_shape = fluid.layers.shape(resize_l)
     im_shape = fluid.layers.slice(im_shape, axes=[0], starts=[2], ends=[4])
-    fluid.layers.Print(im_shape)
 
     with scope("signal_l"):
         signal_l = l_net(resize_l, im_shape, 1)
@@ -74,45 +72,27 @@ with fluid.program_guard(train_program, start_program):
     signal_a_out = fluid.layers.argmax(x=signal_a, axis=1)
     signal_b_out = fluid.layers.argmax(x=signal_b, axis=1)
 
-    # cost_a = fluid.layers.elementwise_mul(cost_a_o, w_a)
-    # cost_b = fluid.layers.elementwise_mul(cost_b_o, w_b)
-    # loss_a = fluid.layers.mean(cost_a)
-    # loss_b = fluid.layers.mean(cost_b)
-
     learning_rate = fluid.layers.piecewise_decay(boundaries=BOUNDARIES, values=VALUES)
     decayed_lr = fluid.layers.linear_lr_warmup(learning_rate,
                                                WARM_UP_STEPS,
                                                START_LR,
                                                END_LR)
     opt = fluid.optimizer.Adam(decayed_lr)
-    opt.minimize(loss_l)
-    opt.minimize(loss_ab)
-    final_loss = loss_l + loss_ab
+    loss_sum = loss_l + loss_ab
+    opt.minimize(loss_sum)
 
-# train_loader = fluid.io.DataLoader.from_generator(feed_list=[resize_l, img_l, label_a, label_b],
-#                                                   capacity=8,
-#                                                   iterable=True,
-#                                                   use_double_buffer=True,
-#                                                   drop_last=True)
-# train_loader.set_batch_generator(reader(TRAIN_DATA_PATH))
-# test_loader = fluid.io.DataLoader.from_generator(feed_list=[resize_l, img_l, label_a, label_b],
-#                                                  capacity=8,
-#                                                  iterable=True,
-#                                                  use_double_buffer=True,
-#                                                  drop_last=True)
-# test_loader.set_batch_generator(reader(TEST_DATA_PATH))
 train_feeder = fluid.DataFeeder(place=place,
                                 feed_list=[resize_l, img_l, label_a, label_b],
                                 program=train_program)
 test_feeder = fluid.DataFeeder(place=place,
                                feed_list=[resize_l, img_l, label_a, label_b],
                                program=test_program)
-train_loader = train_feeder.decorate_reader(reader(TRAIN_DATA_PATH), multi_devices=False)
-test_loader = test_feeder.decorate_reader(reader(TEST_DATA_PATH), multi_devices=False)
+train_loader = train_feeder.decorate_reader(reader(TRAIN_DATA_PATH), multi_devices=True)
+test_loader = test_feeder.decorate_reader(reader(TEST_DATA_PATH), multi_devices=True)
 
 exe.run(start_program)
 
-compiled_train_prog = fluid.CompiledProgram(train_program).with_data_parallel(loss_name=final_loss.name)
+compiled_train_prog = fluid.CompiledProgram(train_program).with_data_parallel(loss_name=loss_sum.name)
 compiled_test_prog = fluid.CompiledProgram(test_program).with_data_parallel(share_vars_from=compiled_train_prog)
 print("Net check --OK")
 if os.path.exists(CHECK_POINT_DIR + ".pdopt") and LOAD_CHECKPOINT:
@@ -132,6 +112,8 @@ for epoch in range(EPOCH):
     out_loss_l = list()
     lr = None
     for data_id, data in enumerate(train_loader()):
+        if data_id == 0:
+            print("Epoch", epoch, "data load done")
         start_time = time.time()
         out = exe.run(program=compiled_train_prog,
                       feed=data,
@@ -146,7 +128,7 @@ for epoch in range(EPOCH):
                   data_id,
                   "TRAIN:\t{:.6f}".format(sum(out_loss_ab) / len(out_loss_ab)),
                   "L_PSNR:{:.6f}".format(10 * np.log10(255 * 255 / sum(out_loss_l) / len(out_loss_l))),
-                  "\tTIME:\t{:.4f}/s".format(cost_time / BATCH_SIZE),
+                  "\tTIME:\t{:.4f}/s".format(cost_time / len(data)),
                   "\tLR:", lr)
             out_loss_ab = []
             out_loss_l = []
@@ -158,7 +140,7 @@ for epoch in range(EPOCH):
                 if t_data_id == 100:
                     break
                 if t_data_id % 10 == 0:
-                    print("Run test", t_data_id)
+                    print("Run test", t_data_id, "%")
                 out = exe.run(program=compiled_test_prog,
                               feed=data_t,
                               fetch_list=[loss_ab, loss_l])
