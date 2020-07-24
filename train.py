@@ -136,7 +136,7 @@ for epoch in range(EPOCH):
         out_loss_l.append(out[1][0])
         lr = out[2]
         cost_time = time.time() - start_time
-        if data_id % (320 // BATCH_SIZE) == (320 // BATCH_SIZE) - 1:
+        if data_id % (320 // BATCH_SIZE) == 0:
             print(epoch,
                   "-",
                   data_id,
@@ -146,7 +146,7 @@ for epoch in range(EPOCH):
                   "\tLR:", lr)
             out_loss_ab = []
             out_loss_l = []
-        fluid.io.save(train_program, CHECK_POINT_DIR)
+            fluid.io.save(train_program, CHECK_POINT_DIR)
         if data_id % (6400 // BATCH_SIZE) == (6400 // BATCH_SIZE) - 1:
             out_loss_ab = []
             out_loss_l = []

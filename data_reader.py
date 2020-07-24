@@ -99,7 +99,7 @@ def reader(data_path, is_val: bool = False, debug: bool = False):
                 else:
                     yield ori_img
 
-    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, 32, order=True)
+    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, 64)
 
 
 if __name__ == '__main__':
