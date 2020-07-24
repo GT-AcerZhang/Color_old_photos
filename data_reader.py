@@ -2,11 +2,25 @@ import os
 import traceback
 import random
 
+import paddle.fluid as fluid
 import numpy as np
 import cv2 as cv
 
-DICT_FILE_PATH = "./Color1D.dict"
-DATA_PATH = "./data/val"
+CPU_NUM = 4
+DICT_FILE_PATH = "./color_files/Color1D_Base_v2.dict"
+with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
+    c_dict = eval(f.read())[0]
+
+
+def check_gray(ipt):
+    img_hsv = cv.cvtColor(ipt, cv.COLOR_BGR2HSV)
+    h, s, v = cv.split(img_hsv)
+    s_w, s_h = s.shape[:2]
+    s_sum = np.sum(s) / (s_w * s_h)
+    if s_sum > 15:
+        return False
+    else:
+        return True
 
 
 def cvt_color(ori_img, color_dict: dict):
@@ -41,51 +55,54 @@ def req_weight(im):
     return im
 
 
-def reader(data_path, is_val: bool = False, im_size: list = None, debug: bool = False):
+def make_train_data(sample):
+    try:
+        r_scale = random.uniform(0.25, 0.8)
+        # 此处可以添加数据增强代码
+        pre_done_img = sample
+        pre_done_img = cv.cvtColor(pre_done_img, cv.COLOR_BGR2LAB)
+        cvt_l, cvt_a, cvt_b = cvt_process(pre_done_img, c_dict)
+
+        cvt_l_label = cv.resize(cvt_l, (
+            int(pre_done_img.shape[1] * r_scale), int(pre_done_img.shape[0] * r_scale)))
+        cvt_l_label = cv.resize(cvt_l_label, (pre_done_img.shape[1], pre_done_img.shape[0]))
+
+        cvt_l_label = np.expand_dims(np.array(cvt_l_label), 0).astype("float32")
+        cvt_l = np.expand_dims(np.array(cvt_l), 0).astype("float32")
+
+        cvt_a = np.expand_dims(np.array(cvt_a), 0).astype("int64")
+        cvt_b = np.expand_dims(np.array(cvt_b), 0).astype("int64")
+        im_shape = np.array(pre_done_img.shape[:-1]).astype("int32")
+
+        return im_shape, cvt_l_label / 255, cvt_l / 255, cvt_a, cvt_b
+
+    except Exception as e:
+        traceback.print_exc()
+
+
+def reader(data_path, is_val: bool = False, debug: bool = False):
     file_names = os.listdir(data_path)
-    with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
-        c_dict = eval(f.read())[0]
 
     def _reader():
         for file_name in file_names:
-            if ".jpg" not in file_name:
-                print(file_name, "skip")
+            if os.path.splitext(file_name)[1] not in [".jpg", ".jpeg", ".bmp", "png"]:
+                print(file_name, "is not right img file, so skip this item!")
                 continue
-            try:
-                r_int = random.randint(1, 2)
-                k_size = [3, 5,7]
-                if is_val:
-                    ori_img = cv.imread(os.path.join(data_path, file_name))
-                    ori_l = cv.cvtColor(ori_img, cv.COLOR_BGR2GRAY)
-                    ori_w, ori_h = ori_l.shape
-                    im_l = cv.resize(ori_l, (im_size[0], im_size[1]))
-                    im_l = np.array(im_l).reshape((1, 1, im_size[0], im_size[1])).astype("float32")
-                    ori_l = np.array(ori_l).reshape((ori_h, ori_w)).astype("uint8")
-                    yield im_l / 255, ori_l, ori_h, ori_w
+            if is_val:
+                pass
+            else:
+                ori_img = cv.imread(os.path.join(data_path, file_name))
+                check_im = cv.resize(ori_img, (32, 32))
+                if check_gray(check_im):
+                    print(file_name, "like L mode, so skip it")
+                    continue
                 else:
-                    ori_img = cv.imread(os.path.join(data_path, file_name))
-                    ori_img = cv.resize(ori_img, (im_size[0], im_size[1]))
-                    ori_l = cv.split(ori_img)[0]
-                    re_img = cv.cvtColor(ori_img, cv.COLOR_BGR2LAB)
-                    r_l, r_a, r_b = cvt_process(re_img, c_dict)
-                    if np.sum(r_l) > np.sum(r_b):
-                        continue
-                    r_l = cv.medianBlur(r_l, 3)
-                    ori_l = np.array(ori_l).reshape((1, 1, im_size[0], im_size[1])).astype("float32")
-                    a_w = req_weight(r_a)
-                    b_w = req_weight(r_b)
-                    r_l = np.array(r_l).reshape((1, 1, im_size[0], im_size[1])).astype("float32")
-                    r_a = np.array(r_a).reshape((1, 1, im_size[0], im_size[1])).astype("int64")
-                    r_b = np.array(r_b).reshape((1, 1, im_size[0], im_size[1])).astype("int64")
+                    yield ori_img
 
-                    yield r_l / 255, ori_l / 255, r_a, r_b, a_w, b_w
-            except Exception as e:
-                traceback.print_exc() if debug else print(e)
-
-    return _reader
+    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, 32, order=True)
 
 
 if __name__ == '__main__':
-    tmp = reader("./data/f", im_size=[256, 256], is_val=True, debug=True)
+    tmp = reader("./data/f", debug=True)
     for i in tmp():
-        print(i)
+        print(1)

@@ -16,9 +16,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-import paddle
 import paddle.fluid as fluid
-from utils.config import cfg
 import contextlib
 
 bn_regularizer = fluid.regularizer.L2DecayRegularizer(regularization_coeff=0.0)
@@ -78,31 +76,18 @@ def group_norm(input, G, eps=1e-5, param_attr=None, bias_attr=None):
 
 
 def bn(*args, **kargs):
-    if cfg.MODEL.DEFAULT_NORM_TYPE == 'bn':
-        with scope('BatchNorm'):
-            return fluid.layers.batch_norm(
-                *args,
-                epsilon=cfg.MODEL.DEFAULT_EPSILON,
-                momentum=cfg.MODEL.BN_MOMENTUM,
-                param_attr=fluid.ParamAttr(
-                    name=name_scope + 'gamma', regularizer=bn_regularizer),
-                bias_attr=fluid.ParamAttr(
-                    name=name_scope + 'beta', regularizer=bn_regularizer),
-                moving_mean_name=name_scope + 'moving_mean',
-                moving_variance_name=name_scope + 'moving_variance',
-                **kargs)
-    elif cfg.MODEL.DEFAULT_NORM_TYPE == 'gn':
-        with scope('GroupNorm'):
-            return group_norm(
-                args[0],
-                cfg.MODEL.DEFAULT_GROUP_NUMBER,
-                eps=cfg.MODEL.DEFAULT_EPSILON,
-                param_attr=fluid.ParamAttr(
-                    name=name_scope + 'gamma', regularizer=bn_regularizer),
-                bias_attr=fluid.ParamAttr(
-                    name=name_scope + 'beta', regularizer=bn_regularizer))
-    else:
-        raise Exception("Unsupport norm type:" + cfg.MODEL.DEFAULT_NORM_TYPE)
+    with scope('BatchNorm'):
+        return fluid.layers.batch_norm(
+            *args,
+            epsilon=1e-5,
+            momentum=0.99,
+            param_attr=fluid.ParamAttr(
+                name=name_scope + 'gamma', regularizer=bn_regularizer),
+            bias_attr=fluid.ParamAttr(
+                name=name_scope + 'beta', regularizer=bn_regularizer),
+            moving_mean_name=name_scope + 'moving_mean',
+            moving_variance_name=name_scope + 'moving_variance',
+            **kargs)
 
 
 def bn_relu(data):

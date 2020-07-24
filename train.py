@@ -5,65 +5,64 @@
 import os
 import time
 
+import numpy as np
 import paddle.fluid as fluid
 
 from models.libs.model_libs import scope
-from models.modeling.unet import unet
+from models.modeling.l_net import l_net
 from data_reader import reader
 
 LOAD_CHECKPOINT = False
 LOAD_PER_MODEL = False
-GPU_NUM = 1
 
-TRAIN_DATA_PATH = "./data/train"
-TEST_DATA_PATH = "./data/test"
-CHECK_POINT_DIR = "./check_point/check_model.color"
-PER_MODEL_DIR = "./data/unet_coco_v3"
-MODEL_DIR = "./best_model.color"
+ROOT_PATH = "./"
+TRAIN_DATA_PATH = os.path.join(ROOT_PATH, "data/train")
+TEST_DATA_PATH = os.path.join(ROOT_PATH, "data/test")
+CHECK_POINT_DIR = os.path.join(ROOT_PATH, "check_point/check_model.color")
+PER_MODEL_DIR = os.path.join(ROOT_PATH, "data/unet_coco_v3")
+MODEL_DIR = os.path.join(ROOT_PATH, "best_model.color")
 
-EPOCH = 100
-BATCH_SIZE = 8
-IM_SIZE = [256] * 2
-OUT_IM_SIZE = [IM_SIZE[0] * 2, IM_SIZE[1] * 2]
-SIGNAL_A_NUM = 21
-SIGNAL_B_NUM = 23
+EPOCH = 5
+BATCH_SIZE = 1  # 与数据增强后分组大小一致
+SIGNAL_A_NUM = 19
+SIGNAL_B_NUM = 20
 
-BOUNDARIES = [1000, 5000, 15000, 100000]
+BOUNDARIES = [10000, 15000, 50000, 100000]
 VALUES = [0.005, 0.001, 0.0005, 0.0001, 0.00005]
-WARM_UP_STEPS = 150
+WARM_UP_STEPS = 1500
 START_LR = 0.005
 END_LR = 0.01
 
-parallel_places = [fluid.CUDAPlace(i) for i in range(GPU_NUM)]
-# place = fluid.CUDAPlace(0)
-place = parallel_places[0]
+place = fluid.CUDAPlace(0)
+places = fluid.cuda_places()
 exe = fluid.Executor(place)
 
 train_program = fluid.Program()
 start_program = fluid.Program()
 
 with fluid.program_guard(train_program, start_program):
-    img_l = fluid.data(name="img_l", shape=[-1, 1] + IM_SIZE)
-    o_img_l = fluid.data(name="o_img_l", shape=[-1, 1] + IM_SIZE)
-    label_a = fluid.data(name="label_a", shape=[-1, 1] + IM_SIZE, dtype="int64")
-    label_b = fluid.data(name="label_b", shape=[-1, 1] + IM_SIZE, dtype="int64")
-    w_a = fluid.data(name="w_a", shape=[-1] + IM_SIZE)
-    w_b = fluid.data(name="w_b", shape=[-1] + IM_SIZE)
+    # 训练输入层定义
+    im_shape = fluid.data(name="im_shape", shape=[2], dtype="int32")
+    # 缩放后数据以及原始数据的灰度图像
+    resize_l = fluid.data(name="resize_l", shape=[-1, 1, -1, -1])
+
+    img_l = fluid.data(name="img_l", shape=[-1, 1, -1, -1])
+    label_a = fluid.data(name="label_a", shape=[-1, 1, -1, -1], dtype="int64")
+    label_b = fluid.data(name="label_b", shape=[-1, 1, -1, -1], dtype="int64")
 
     with scope("signal_l"):
-        signal_l = unet(img_l, 1)
+        signal_l = l_net(resize_l, im_shape, 1)
     with scope("signal_a"):
-        signal_a = unet(img_l, SIGNAL_A_NUM)
+        signal_a = l_net(img_l, im_shape, SIGNAL_A_NUM)
     with scope("signal_b"):
-        signal_b = unet(img_l, SIGNAL_B_NUM)
+        signal_b = l_net(img_l, im_shape, SIGNAL_B_NUM)
 
-    loss_l = fluid.layers.mse_loss(signal_l, o_img_l)
-    # loss_l = fluid.layers.mean(cost_l)
+    loss_l = fluid.layers.mse_loss(signal_l, img_l)
+    cost_a_o, signal_a = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1, return_softmax=True)
+    cost_b_o, signal_b = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1, return_softmax=True)
 
-    cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
-    cost_b_o = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
-    cost = cost_a_o + cost_b_o
-    loss = fluid.layers.mean(cost)
+    cost_ab = cost_a_o + cost_b_o
+    loss_ab = fluid.layers.mean(cost_ab)
 
     test_program = train_program.clone(for_test=True)
     signal_a_out = fluid.layers.argmax(x=signal_a, axis=1)
@@ -81,28 +80,36 @@ with fluid.program_guard(train_program, start_program):
                                                END_LR)
     opt = fluid.optimizer.Adam(decayed_lr)
     opt.minimize(loss_l)
-    opt.minimize(loss)
-    final_loss = loss_l + loss
+    opt.minimize(loss_ab)
+    final_loss = loss_l + loss_ab
 
-train_loader = fluid.io.DataLoader.from_generator(feed_list=[img_l, o_img_l, label_a, label_b, w_a, w_b],
-                                                  capacity=16,
-                                                  iterable=True,
-                                                  use_double_buffer=True,
-                                                  drop_last=True)
-train_loader.set_sample_generator(reader(TRAIN_DATA_PATH, im_size=IM_SIZE), BATCH_SIZE, drop_last=True, places=place)
-test_loader = fluid.io.DataLoader.from_generator(feed_list=[img_l, o_img_l, label_a, label_b, w_a, w_b],
-                                                 capacity=8,
-                                                 iterable=True,
-                                                 use_double_buffer=True,
-                                                 drop_last=True)
-test_loader.set_sample_generator(reader(TEST_DATA_PATH, im_size=IM_SIZE), BATCH_SIZE, drop_last=True, places=place)
+# train_loader = fluid.io.DataLoader.from_generator(feed_list=[im_shape, resize_l, img_l, label_a, label_b],
+#                                                   capacity=8,
+#                                                   iterable=True,
+#                                                   use_double_buffer=True,
+#                                                   drop_last=True)
+# train_loader.set_sample_generator(reader(TRAIN_DATA_PATH), batch_size=BATCH_SIZE, drop_last=True, places=places)
+# test_loader = fluid.io.DataLoader.from_generator(feed_list=[im_shape, resize_l, img_l, label_a, label_b],
+#                                                  capacity=8,
+#                                                  iterable=True,
+#                                                  use_double_buffer=True,
+#                                                  drop_last=True)
+# test_loader.set_sample_generator(reader(TEST_DATA_PATH), batch_size=BATCH_SIZE, drop_last=True,places=places)
+train_feeder = fluid.DataFeeder(place=place,
+                                feed_list=[im_shape, resize_l, img_l, label_a, label_b],
+                                program=train_program)
+test_feeder = fluid.DataFeeder(place=place,
+                               feed_list=[im_shape, resize_l, img_l, label_a, label_b],
+                               program=test_program)
+train_loader = train_feeder.decorate_reader(fluid.io.batch(reader(TRAIN_DATA_PATH), batch_size=BATCH_SIZE),
+                                            multi_devices=True)
+test_loader = test_feeder.decorate_reader(fluid.io.batch(reader(TEST_DATA_PATH), batch_size=BATCH_SIZE),
+                                          multi_devices=True)
 
 exe.run(start_program)
 
-compiled_train_prog = fluid.CompiledProgram(train_program).with_data_parallel(loss_name=final_loss.name,
-                                                                              places=parallel_places)
-compiled_test_prog = fluid.CompiledProgram(test_program).with_data_parallel(share_vars_from=compiled_train_prog,
-                                                                            places=parallel_places)
+compiled_train_prog = fluid.CompiledProgram(train_program).with_data_parallel(loss_name=final_loss.name)
+compiled_test_prog = fluid.CompiledProgram(test_program).with_data_parallel(share_vars_from=compiled_train_prog)
 print("Net check --OK")
 if os.path.exists(CHECK_POINT_DIR + ".pdopt") and LOAD_CHECKPOINT:
     fluid.io.load(train_program, CHECK_POINT_DIR, exe)
@@ -124,7 +131,7 @@ for epoch in range(EPOCH):
         start_time = time.time()
         out = exe.run(program=compiled_train_prog,
                       feed=data,
-                      fetch_list=[loss, loss_l, decayed_lr])
+                      fetch_list=[loss_ab, loss_l, decayed_lr])
         out_loss_ab.append(out[0][0])
         out_loss_l.append(out[1][0])
         lr = out[2]
@@ -134,7 +141,7 @@ for epoch in range(EPOCH):
                   "-",
                   data_id,
                   "TRAIN:\t{:.6f}".format(sum(out_loss_ab) / len(out_loss_ab)),
-                  "L_Loss:{:.6f}".format(sum(out_loss_l) / len(out_loss_l)),
+                  "L_PSNR:{:.6f}".format(10 * np.log10(255 * 255 / sum(out_loss_l) / len(out_loss_l))),
                   "\tTIME:\t{:.4f}/s".format(cost_time / BATCH_SIZE),
                   "\tLR:", lr)
             out_loss_ab = []
@@ -145,20 +152,20 @@ for epoch in range(EPOCH):
             out_loss_l = []
             for data_t in test_loader:
                 out = exe.run(program=compiled_test_prog,
-                              feed=data_t,
-                              fetch_list=[loss, loss_l])
+                              feed=data,
+                              fetch_list=[loss_ab, loss_l])
                 out_loss_ab.append(out[0][0])
                 out_loss_l.append(out[1][0])
             test_loss = sum(out_loss_ab) / len(out_loss_ab)
             if test_loss <= MIN_LOSS:
                 MIN_LOSS = test_loss
                 fluid.io.save_inference_model(dirname=MODEL_DIR,
-                                              feeded_var_names=["img_l"],
+                                              feeded_var_names=["im_shape", "img_l", "resize_l"],
                                               target_vars=[signal_l, signal_a_out, signal_b_out],
                                               executor=exe,
                                               main_program=train_program)
 
             print(epoch,
                   "TEST:\t{:.6f}".format(sum(out_loss_ab) / len(out_loss_ab)),
-                  "L_Loss:{:.8f}".format(sum(out_loss_l) / len(out_loss_l)),
+                  "L_PSNR:{:.8f}".format(10 * np.log10(255 * 255 / sum(out_loss_l) / len(out_loss_l))),
                   "\tMIN LOSS:\t{:.4f}".format(MIN_LOSS))
