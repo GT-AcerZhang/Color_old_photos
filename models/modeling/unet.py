@@ -19,7 +19,6 @@ from __future__ import print_function
 import contextlib
 import paddle
 import paddle.fluid as fluid
-from utils.config import cfg
 from models.libs.model_libs import scope, name_scope
 from models.libs.model_libs import bn, bn_relu, relu
 from models.libs.model_libs import conv, max_pool, deconv
@@ -57,16 +56,7 @@ def up(data, short_cut, out_ch):
         initializer=fluid.initializer.XavierInitializer(),
     )
     with scope("up"):
-        if cfg.MODEL.UNET.UPSAMPLE_MODE == 'bilinear':
-            data = fluid.layers.resize_bilinear(data, short_cut.shape[2:])
-        else:
-            data = deconv(
-                data,
-                out_ch // 2,
-                filter_size=2,
-                stride=2,
-                padding=0,
-                param_attr=param_attr)
+        data = fluid.layers.resize_bilinear(data, short_cut.shape[2:])
         data = fluid.layers.concat([data, short_cut], axis=1)
         data = double_conv(data, out_ch)
     return data
@@ -127,7 +117,7 @@ def unet(input, num_classes):
 
 
 if __name__ == '__main__':
-    image_shape = [-1, 3, 320, 320]
+    image_shape = [-1, 3, 321, 320]
     image = fluid.data(name='image', shape=image_shape, dtype='float32')
     logit = unet(image, 3)
     print("logit:", logit.shape)

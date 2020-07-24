@@ -29,7 +29,6 @@ feeder = fluid.DataFeeder(place=place, feed_list=feed_list, program=program)
 
 for data in infer_reader():
     ipt_data = [i[0] for i in data]
-    # ipt_l = [i[1] for i in data]
     ipt_h = [i[2] for i in data]
     ipt_w = [i[3] for i in data]
     out = exe.run(program, feeder.feed(ipt_data), fetch_list=target_list)
