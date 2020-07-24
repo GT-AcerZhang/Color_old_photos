@@ -24,12 +24,12 @@ PER_MODEL_DIR = os.path.join(ROOT_PATH, "data/unet_coco_v3")
 MODEL_DIR = os.path.join(ROOT_PATH, "best_model.color")
 
 EPOCH = 5
-BATCH_SIZE = 1  # 与数据增强后分组大小一致
+BATCH_SIZE = 4 * 8  # 与数据增强后分组大小一致
 SIGNAL_A_NUM = 19
 SIGNAL_B_NUM = 20
 
 BOUNDARIES = [10000, 15000, 50000, 100000]
-VALUES = [0.005, 0.001, 0.0005, 0.0001, 0.00005]
+VALUES = [0.001, 0.00005, 0.00001, 0.000005, 0.000001]
 WARM_UP_STEPS = 500
 START_LR = 0.005
 END_LR = 0.01
@@ -94,21 +94,21 @@ with fluid.program_guard(train_program, start_program):
 #                                                   iterable=True,
 #                                                   use_double_buffer=True,
 #                                                   drop_last=True)
-# train_loader.set_sample_generator(reader(TRAIN_DATA_PATH), batch_size=BATCH_SIZE, drop_last=True, places=places)
+# train_loader.set_batch_generator(reader(TRAIN_DATA_PATH))
 # test_loader = fluid.io.DataLoader.from_generator(feed_list=[resize_l, img_l, label_a, label_b],
 #                                                  capacity=8,
 #                                                  iterable=True,
 #                                                  use_double_buffer=True,
 #                                                  drop_last=True)
-# test_loader.set_sample_generator(reader(TEST_DATA_PATH), batch_size=BATCH_SIZE, drop_last=True,places=places)
+# test_loader.set_batch_generator(reader(TEST_DATA_PATH))
 train_feeder = fluid.DataFeeder(place=place,
                                 feed_list=[resize_l, img_l, label_a, label_b],
                                 program=train_program)
 test_feeder = fluid.DataFeeder(place=place,
                                feed_list=[resize_l, img_l, label_a, label_b],
                                program=test_program)
-train_loader = train_feeder.decorate_reader(reader(TRAIN_DATA_PATH), multi_devices=True)
-test_loader = test_feeder.decorate_reader(reader(TEST_DATA_PATH), multi_devices=True)
+train_loader = train_feeder.decorate_reader(reader(TRAIN_DATA_PATH), multi_devices=False)
+test_loader = test_feeder.decorate_reader(reader(TEST_DATA_PATH), multi_devices=False)
 
 exe.run(start_program)
 
@@ -154,9 +154,13 @@ for epoch in range(EPOCH):
         if data_id % 500 == 500 - 1:
             out_loss_ab = []
             out_loss_l = []
-            for data_t in test_loader():
+            for t_data_id, data_t in enumerate(test_loader()):
+                if t_data_id == 100:
+                    break
+                if t_data_id % 10 == 0:
+                    print("Run test", t_data_id)
                 out = exe.run(program=compiled_test_prog,
-                              feed=data,
+                              feed=data_t,
                               fetch_list=[loss_ab, loss_l])
                 out_loss_ab.append(out[0][0])
                 out_loss_l.append(out[1][0])

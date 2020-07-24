@@ -6,7 +6,7 @@ import paddle.fluid as fluid
 import numpy as np
 import cv2 as cv
 
-CPU_NUM = 60
+CPU_NUM = 4
 GPU_NUM = 8
 DICT_FILE_PATH = "./color_files/Color1D_Base_v2.dict"
 with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
@@ -57,49 +57,45 @@ def req_weight(im):
 
 
 def make_train_data(sample):
-    try:
-        tmp_cvt_l_label = []
-        tmp_cvt_l = []
-        tmp_cvt_a = []
-        tmp_cvt_b = []
-        for _ in range(GPU_NUM):
-            # 原始图像随机尺寸缩放
-            r_ori_scale = random.uniform(0.25, 1.)
-            r_scale = random.uniform(0.5, 0.8)
-            sample_h, sample_w = sample.shape[:2]
-            pre_done_img = cv.resize(sample, (
-                int(sample_w * r_ori_scale), int(sample_h * r_ori_scale)))
-            pre_done_img = cv.resize(pre_done_img, (sample_w, sample_h))
+    tmp_cvt_l_label = []
+    tmp_cvt_l = []
+    tmp_cvt_a = []
+    tmp_cvt_b = []
+    for _ in range(GPU_NUM):
+        # 原始图像随机尺寸缩放
+        r_ori_scale = random.uniform(0.25, 1.)
+        r_scale = random.uniform(0.5, 0.8)
+        sample_h, sample_w = sample.shape[:2]
+        pre_done_img = cv.resize(sample, (
+            int(sample_w * r_ori_scale), int(sample_h * r_ori_scale)))
+        pre_done_img = cv.resize(pre_done_img, (sample_w, sample_h))
 
-            # 转化颜色空间
-            pre_done_img = cv.cvtColor(pre_done_img, cv.COLOR_BGR2LAB)
+        # 转化颜色空间
+        pre_done_img = cv.cvtColor(pre_done_img, cv.COLOR_BGR2LAB)
 
-            # 压缩颜色空间
-            cvt_l, cvt_a, cvt_b = cvt_process(pre_done_img, c_dict)
+        # 压缩颜色空间
+        cvt_l, cvt_a, cvt_b = cvt_process(pre_done_img, c_dict)
 
-            # 生成低分辨率图像
-            cvt_l_label = cv.resize(cvt_l, (
-                int(pre_done_img.shape[1] * r_scale), int(pre_done_img.shape[0] * r_scale)))
-            cvt_l_label = cv.resize(cvt_l_label, (pre_done_img.shape[1], pre_done_img.shape[0]))
+        # 生成低分辨率图像
+        cvt_l_label = cv.resize(cvt_l, (
+            int(pre_done_img.shape[1] * r_scale), int(pre_done_img.shape[0] * r_scale)))
+        cvt_l_label = cv.resize(cvt_l_label, (pre_done_img.shape[1], pre_done_img.shape[0]))
 
-            # 数据翻转增强
-            for mode in random.sample([-1, 0, 1], 3):
-                tmp_cvt_l_label.append([cv.flip(cvt_l_label, mode)])
-                tmp_cvt_l.append([cv.flip(cvt_l, mode)])
-                tmp_cvt_a.append([cv.flip(cvt_a, mode)])
-                tmp_cvt_b.append([cv.flip(cvt_b, mode)])
-            tmp_cvt_l_label.append([cvt_l_label])
-            tmp_cvt_l.append([cvt_l])
-            tmp_cvt_a.append([cvt_a])
-            tmp_cvt_b.append([cvt_b])
-        cvt_l_label = np.array(tmp_cvt_l_label).astype("float32")
-        cvt_l = np.array(tmp_cvt_l).astype("float32")
-        cvt_a = np.array(tmp_cvt_a).astype("int64")
-        cvt_b = np.array(tmp_cvt_b).astype("int64")
-        return cvt_l_label / 255, cvt_l / 255, cvt_a, cvt_b
-
-    except Exception as e:
-        traceback.print_exc()
+        # 数据翻转增强
+        for mode in random.sample([-1, 0, 1], 3):
+            tmp_cvt_l_label.append([cv.flip(cvt_l_label, mode)])
+            tmp_cvt_l.append([cv.flip(cvt_l, mode)])
+            tmp_cvt_a.append([cv.flip(cvt_a, mode)])
+            tmp_cvt_b.append([cv.flip(cvt_b, mode)])
+        tmp_cvt_l_label.append([cvt_l_label])
+        tmp_cvt_l.append([cvt_l])
+        tmp_cvt_a.append([cvt_a])
+        tmp_cvt_b.append([cvt_b])
+    cvt_l_label = np.array(tmp_cvt_l_label).astype("float32")
+    cvt_l = np.array(tmp_cvt_l).astype("float32")
+    cvt_a = np.array(tmp_cvt_a).astype("int64")
+    cvt_b = np.array(tmp_cvt_b).astype("int64")
+    return cvt_l_label / 255, cvt_l / 255, cvt_a, cvt_b
 
 
 def reader(data_path, is_val: bool = False, debug: bool = False):
