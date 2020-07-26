@@ -14,7 +14,7 @@ from data_reader import reader
 
 LOAD_CHECKPOINT = False
 LOAD_PER_MODEL = False
-FREEZE = False
+FREEZE_PIX = False
 
 ROOT_PATH = "./"
 TRAIN_DATA_PATH = os.path.join(ROOT_PATH, "data/train")
@@ -49,6 +49,8 @@ with fluid.program_guard(train_program, start_program):
     img_l = fluid.data(name="img_l", shape=[-1, 1, -1, -1])
     label_a = fluid.data(name="label_a", shape=[-1, 1, -1, -1], dtype="int64")
     label_b = fluid.data(name="label_b", shape=[-1, 1, -1, -1], dtype="int64")
+    w_a = fluid.data(name="w_a", shape=[-1, 1, -1, -1])
+    w_b = fluid.data(name="w_b", shape=[-1, 1, -1, -1])
 
     # 获得shape参数
     im_shape = fluid.layers.shape(resize_l)
@@ -57,20 +59,21 @@ with fluid.program_guard(train_program, start_program):
     with scope("signal_l"):
         signal_l = l_net(resize_l, im_shape, 1)
     with scope("signal_a"):
-        signal_a = l_net(img_l, im_shape, SIGNAL_A_NUM) if not FREEZE else l_net(signal_l, im_shape, SIGNAL_A_NUM)
+        signal_a = l_net(img_l, im_shape, SIGNAL_A_NUM) if not FREEZE_PIX else l_net(signal_l, im_shape, SIGNAL_A_NUM)
     with scope("signal_b"):
-        signal_b = l_net(img_l, im_shape, SIGNAL_B_NUM) if not FREEZE else l_net(signal_l, im_shape, SIGNAL_B_NUM)
+        signal_b = l_net(img_l, im_shape, SIGNAL_B_NUM) if not FREEZE_PIX else l_net(signal_l, im_shape, SIGNAL_B_NUM)
 
     loss_l = fluid.layers.mse_loss(signal_l, img_l)
-    cost_a_o, signal_a = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1, return_softmax=True)
-    cost_b_o, signal_b = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1, return_softmax=True)
-
+    cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
+    cost_b_o = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
+    cost_a_o = fluid.layers.elementwise_mul(cost_a_o, w_a, 1)
+    cost_b_o = fluid.layers.elementwise_mul(cost_b_o, w_b, 1)
     cost_ab = cost_a_o + cost_b_o
     loss_ab = fluid.layers.mean(cost_ab)
 
     test_program = train_program.clone(for_test=True)
-    signal_a_out = fluid.layers.argmax(x=signal_a, axis=1)
-    signal_b_out = fluid.layers.argmax(x=signal_b, axis=1)
+    signal_a_out = fluid.layers.argmax(x=signal_a)
+    signal_b_out = fluid.layers.argmax(x=signal_b)
 
     learning_rate = fluid.layers.piecewise_decay(boundaries=BOUNDARIES, values=VALUES)
     decayed_lr = fluid.layers.linear_lr_warmup(learning_rate,
@@ -82,13 +85,13 @@ with fluid.program_guard(train_program, start_program):
     opt.minimize(loss_sum)
 
 train_feeder = fluid.DataFeeder(place=place,
-                                feed_list=[resize_l, img_l, label_a, label_b],
+                                feed_list=[resize_l, img_l, label_a, label_b, w_a, w_b],
                                 program=train_program)
 test_feeder = fluid.DataFeeder(place=place,
-                               feed_list=[resize_l, img_l, label_a, label_b],
+                               feed_list=[resize_l, img_l, label_a, label_b, w_a, w_b],
                                program=test_program)
 train_loader = train_feeder.decorate_reader(reader(TRAIN_DATA_PATH), multi_devices=True)
-test_loader = test_feeder.decorate_reader(reader(TEST_DATA_PATH), multi_devices=True)
+test_loader = test_feeder.decorate_reader(reader(TEST_DATA_PATH, is_test=True), multi_devices=True)
 
 exe.run(start_program)
 

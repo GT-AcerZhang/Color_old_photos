@@ -1,5 +1,6 @@
 import os
 import random
+import traceback
 
 import paddle.fluid as fluid
 import numpy as np
@@ -46,10 +47,11 @@ def cvt_color(ori_img, color_dict: dict):
     :param color_dict: 颜色字典
     :return: 转换后图像
     """
+    ori_img = ori_img.copy()
     h, w = ori_img.shape
     for pix_h in range(h):
         for pix_w in range(w):
-            ori_img[pix_h][pix_w] = color_dict[ori_img[pix_h][pix_w]]
+            ori_img[pix_h][pix_w] = color_dict[int(ori_img[pix_h][pix_w])]
     return ori_img
 
 
@@ -75,24 +77,29 @@ def req_weight(im):
     count = np.histogram(im, 256, range=(0, 256))[0].astype("float32")
     count[count == 0] = 1.
     count_t = np.reciprocal(count)
+    count_t = np.maximum(count_t, 0.001)
     color_map = dict([(k, v) for k, v in zip(range(256), count_t)])
-
-    im = im.copy().astype("float32")
-    for pix_value in range(256):
-        if pix_value in im:
-            im[im == pix_value] = max(.001, color_map[pix_value])
-    return im
+    im_w = cvt_color(im.astype("float32"), color_map)
+    im_w /= np.max(im_w)
+    return im_w
 
 
 def make_train_data(sample):
+    sample, is_test = sample
     tmp_cvt_l_label = []
     tmp_cvt_l = []
     tmp_cvt_a = []
     tmp_cvt_b = []
+    tmp_w_a = []
+    tmp_w_b = []
     for index in range(SAMPLE_NUM):
         # 原始图像随机尺寸缩放
-        r_ori_scale = random.uniform(0.25, 0.9)
-        r_scale = random.uniform(0.5, 0.8)
+        if is_test:
+            r_ori_scale = 0.9
+            r_scale = 0.5
+        else:
+            r_ori_scale = random.uniform(0.25, 0.9)
+            r_scale = random.uniform(0.5, 0.8)
         sample_h, sample_w = sample.shape[:2]
         pre_done_img = cv.resize(sample, (
             int(sample_w * r_ori_scale), int(sample_h * r_ori_scale)))
@@ -109,29 +116,38 @@ def make_train_data(sample):
             int(pre_done_img.shape[1] * r_scale), int(pre_done_img.shape[0] * r_scale)))
         cvt_l_label = cv.resize(cvt_l_label, (pre_done_img.shape[1], pre_done_img.shape[0]))
 
-        # 数据翻转增强
-        for mode in random.sample([-1, 0, 1], 3):
-            tmp_cvt_l_label.append([cv.flip(cvt_l_label, mode)])
-            tmp_cvt_l.append([cv.flip(cvt_l, mode)])
-            tmp_cvt_a.append([cv.flip(cvt_a, mode)])
-            tmp_cvt_b.append([cv.flip(cvt_b, mode)])
-        tmp_cvt_l_label.append([cvt_l_label])
-        tmp_cvt_l.append([cvt_l])
-        tmp_cvt_a.append([cvt_a])
-        tmp_cvt_b.append([cvt_b])
+        tmp_w_a_array = [req_weight(cvt_a)]
+        tmp_w_b_array = [req_weight(cvt_b)]
+        # 数据增强 - 翻转
+        for mode in random.sample([-1, 0, 1, -2], 4):
+            if mode == -2:
+                tmp_cvt_l_label.append([cvt_l_label])
+                tmp_cvt_l.append([cvt_l])
+                tmp_cvt_a.append([cvt_a])
+                tmp_cvt_b.append([cvt_b])
+            else:
+                tmp_cvt_l_label.append([cv.flip(cvt_l_label, mode)])
+                tmp_cvt_l.append([cv.flip(cvt_l, mode)])
+                tmp_cvt_a.append([cv.flip(cvt_a, mode)])
+                tmp_cvt_b.append([cv.flip(cvt_b, mode)])
+            tmp_w_a.append(tmp_w_a_array)
+            tmp_w_b.append(tmp_w_b_array)
+
     cvt_l_label = np.array(tmp_cvt_l_label).astype("float32")
     cvt_l = np.array(tmp_cvt_l).astype("float32")
     cvt_a = np.array(tmp_cvt_a).astype("int64")
     cvt_b = np.array(tmp_cvt_b).astype("int64")
+    w_a = np.array(tmp_w_a).astype("float32")
+    w_b = np.array(tmp_w_b).astype("float32")
     pack = []
     for index in range(SAMPLE_NUM * 4):
         if index == MAX_BATCH_SIZE:
             break
-        pack.append((cvt_l_label[index] / 255, cvt_l[index] / 255, cvt_a[index], cvt_b[index]))
+        pack.append((cvt_l_label[index] / 255, cvt_l[index] / 255, cvt_a[index], cvt_b[index], w_a[index], w_b[index]))
     return pack
 
 
-def reader(data_path, is_val: bool = False, debug: bool = False):
+def reader(data_path, is_test: bool = False, is_infer: bool = False):
     file_names = os.listdir(data_path)
 
     def _reader():
@@ -139,8 +155,15 @@ def reader(data_path, is_val: bool = False, debug: bool = False):
             if os.path.splitext(file_name)[1] not in [".jpg", ".jpeg", ".bmp", "png"]:
                 print(file_name, "is not right img file, so skip this item!")
                 continue
-            if is_val:
-                pass
+            if is_infer:
+                try:
+                    ori_img = cv.imread(os.path.join(data_path, file_name))
+                    l_img = cv.cvtColor(ori_img, cv.COLOR_BGR2GRAY)
+                    l_img = np.array([[l_img]]).astype("float32") / 255
+                    yield l_img
+                except Exception:
+                    print(file_name, "Image reading failed!")
+                    traceback.print_exc()
             else:
                 ori_img = cv.imread(os.path.join(data_path, file_name))
                 check_im = cv.resize(ori_img, (32, 32))
@@ -148,12 +171,12 @@ def reader(data_path, is_val: bool = False, debug: bool = False):
                     print(file_name, "like L mode, so skip it")
                     continue
                 else:
-                    yield ori_img
+                    yield ori_img, is_test
 
-    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, CPU_NUM * 2)
+    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, CPU_NUM * 2) if not is_infer else _reader
 
 
 if __name__ == '__main__':
-    tmp = reader("data/f", debug=True)
+    tmp = reader("data/f")
     for i in tmp():
         print(1)
