@@ -6,8 +6,9 @@ import paddle.fluid as fluid
 import numpy as np
 import cv2 as cv
 
+DEBUG = False
 CPU_NUM = 4  # CPU 队列数 不推荐过高
-MAX_BATCH_SIZE = 3  # BATCH SIZE 阈值
+MAX_BATCH_SIZE = 2  # BATCH SIZE 阈值，16G显存推荐为2
 MEMORY_CAPACITY = 15.9  # 硬件会保留部分显存，此处为可用内存大小，单位GB
 DICT_FILE_PATH = "./color_files/Color1D_Base_v2.dict"  # 颜色空间文件
 
@@ -168,7 +169,8 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False):
                 ori_img = cv.imread(os.path.join(data_path, file_name))
                 check_im = cv.resize(ori_img, (32, 32))
                 if check_gray(check_im):
-                    print(file_name, "like L mode, so skip it")
+                    if DEBUG:
+                        print(file_name, "like L mode, so skip it")
                     continue
                 else:
                     yield ori_img, is_test

@@ -33,12 +33,9 @@ reader = reader(TEST_DATA_PATH, is_infer=True)
 program, feed_list, target_list = fluid.io.load_inference_model(dirname=MODEL_DIR, executor=exe)
 
 for data in reader():
-    print(1)
     ori_l = data[0]
     out = exe.run(program, feed={feed_list[0]: data, feed_list[1]: data}, fetch_list=target_list)
     signal_l, signal_a_out, signal_b_out = out
     visual_img(signal_l[0][0] * 255, signal_a_out[0], signal_b_out[0], "all")
-    print(2)
     visual_img(ori_l[0] * 255, signal_a_out[0], signal_b_out[0], "ori_l")
-    print(3)
     cv.waitKey(0)
