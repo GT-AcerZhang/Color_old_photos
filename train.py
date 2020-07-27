@@ -66,9 +66,10 @@ with fluid.program_guard(train_program, start_program):
     loss_l = fluid.layers.mse_loss(signal_l, img_l)
     cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
     cost_b_o = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
-    cost_a_o = fluid.layers.elementwise_mul(cost_a_o, w_a, 1)
-    cost_b_o = fluid.layers.elementwise_mul(cost_b_o, w_b, 1)
-    cost_ab = cost_a_o + cost_b_o
+    ori_loss_ab = fluid.layers.mean(cost_a_o + cost_b_o)
+    cost_a = fluid.layers.elementwise_mul(cost_a_o, w_a, 1)
+    cost_b = fluid.layers.elementwise_mul(cost_b_o, w_b, 1)
+    cost_ab = cost_a + cost_b
     loss_ab = fluid.layers.mean(cost_ab)
 
     test_program = train_program.clone(for_test=True)
@@ -120,7 +121,7 @@ for epoch in range(EPOCH):
         start_time = time.time()
         out = exe.run(program=compiled_train_prog,
                       feed=data,
-                      fetch_list=[loss_ab, loss_l, decayed_lr])
+                      fetch_list=[ori_loss_ab, loss_l, decayed_lr])
         out_loss_ab.append(out[0][0])
         out_loss_l.append(out[1][0])
         lr = out[2]
@@ -146,7 +147,7 @@ for epoch in range(EPOCH):
                     print("Run test", t_data_id, "%")
                 out = exe.run(program=compiled_test_prog,
                               feed=data_t,
-                              fetch_list=[loss_ab, loss_l])
+                              fetch_list=[ori_loss_ab, loss_l])
                 out_loss_ab.append(out[0][0])
                 out_loss_l.append(out[1][0])
             test_loss = sum(out_loss_ab) / len(out_loss_ab)
