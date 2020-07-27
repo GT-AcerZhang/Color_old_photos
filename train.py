@@ -60,13 +60,17 @@ with fluid.program_guard(train_program, start_program):
     # 组网
     with scope("signal_l"):
         signal_l = l_net(resize_l, im_shape, 1)
-    encode_data, short_cuts = encode(img_l)
+    encode_data, _ = encode(img_l)
     with scope("signal_a"):
-        decode_data = decode(encode_data, short_cuts, im_shape)
-        signal_a = fluid.layers.conv2d(decode_data, SIGNAL_A_NUM, 1, 1)
+        encode_data_a, short_cuts_a = encode(img_l)
+        encode_data_a = fluid.layers.concat([encode_data, encode_data_a], axis=1)
+        decode_data_a = decode(encode_data_a, short_cuts_a, im_shape)
+        signal_a = fluid.layers.conv2d(decode_data_a, SIGNAL_A_NUM, 1, 1)
     with scope("signal_b"):
-        decode_data_b = decode(encode_data, short_cuts, im_shape)
-        signal_b = fluid.layers.conv2d(decode_data, SIGNAL_A_NUM, 1, 1)
+        encode_data_b, short_cuts_b = encode(img_l)
+        encode_data_b = fluid.layers.concat([encode_data, encode_data_b], axis=1)
+        decode_data_b = decode(encode_data_b, short_cuts_b, im_shape)
+        signal_b = fluid.layers.conv2d(decode_data_a, SIGNAL_A_NUM, 1, 1)
 
     loss_l = fluid.layers.mse_loss(signal_l, img_l)
     cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
