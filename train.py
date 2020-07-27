@@ -166,5 +166,5 @@ for epoch in range(EPOCH):
                   epoch,
                   "TEST:\t{:.6f}".format(sum(out_loss_ab) / len(out_loss_ab)),
                   "L_PSNR:{:.8f}".format(10 * np.log10(255 * 255 / sum(out_loss_l) / len(out_loss_l))),
-                  "\tMIN LOSS:\t{:.4f}".format(MIN_LOSS),
+                  "\033[0m\t\033[0;37;42mMIN LOSS:\t{:.4f}".format(MIN_LOSS),
                   "\033[0m")

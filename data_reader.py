@@ -73,11 +73,11 @@ def cvt_process(ori_img, color_dict):
 def req_weight(im):
     """
     获取颜色权重
-    :return: 将颜色值转换为权重值，默认最低权重值为0.001
+    :return: 将颜色值转换为权重值，默认最低权重值为0.0001
     """
+    h, w = im.shape[:2]
     count = np.histogram(im, 256, range=(0, 256))[0].astype("float32")
-    count[count == 0] = 1.
-    count_t = np.reciprocal(count)
+    count_t = 1 - (count / (h * w))
     count_t = np.maximum(count_t, 0.001)
     color_map = dict([(k, v) for k, v in zip(range(256), count_t)])
     im_w = cvt_color(im.astype("float32"), color_map)
@@ -185,7 +185,7 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False):
                 else:
                     yield ori_img, is_test
 
-    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, CPU_NUM * 2) if not is_infer else _reader
+    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, CPU_NUM * 4) if not is_infer else _reader
 
 
 if __name__ == '__main__':
