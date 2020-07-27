@@ -93,7 +93,11 @@ def make_train_data(sample):
     tmp_cvt_b = []
     tmp_w_a = []
     tmp_w_b = []
-    for index in range(SAMPLE_NUM):
+    if is_test:
+        sample_num = 1
+    else:
+        sample_num = SAMPLE_NUM
+    for index in range(sample_num):
         # 原始图像随机尺寸缩放
         if is_test:
             r_ori_scale = 0.9
@@ -121,11 +125,15 @@ def make_train_data(sample):
         tmp_w_b_array = [req_weight(cvt_b)]
         # 数据增强 - 翻转
         for mode in random.sample([-1, 0, 1, -2], 4):
-            if mode == -2:
+            if mode == -2 or is_test:
                 tmp_cvt_l_label.append([cvt_l_label])
                 tmp_cvt_l.append([cvt_l])
                 tmp_cvt_a.append([cvt_a])
                 tmp_cvt_b.append([cvt_b])
+                if is_test:
+                    tmp_w_a.append(tmp_w_a_array)
+                    tmp_w_b.append(tmp_w_b_array)
+                    break
             else:
                 tmp_cvt_l_label.append([cv.flip(cvt_l_label, mode)])
                 tmp_cvt_l.append([cv.flip(cvt_l, mode)])
@@ -145,6 +153,8 @@ def make_train_data(sample):
         if index == MAX_BATCH_SIZE:
             break
         pack.append((cvt_l_label[index] / 255, cvt_l[index] / 255, cvt_a[index], cvt_b[index], w_a[index], w_b[index]))
+        if is_test:
+            break
     return pack
 
 
@@ -179,6 +189,23 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False):
 
 
 if __name__ == '__main__':
-    tmp = reader("data/f")
+    tmp = reader("data/ff", is_test=True)
+    with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
+        a_dict_vdl, b_dict_vdl = eval(f.read())[1]
+
+
+    def vdl(l_vdl, a_vdl, b_vdl, name):
+        a_vdl = cvt_color(a_vdl, a_dict_vdl)
+        b_vdl = cvt_color(b_vdl, b_dict_vdl)
+        tmp_img = cv.merge([l_vdl.astype("uint8"), a_vdl.astype("uint8"), b_vdl.astype("uint8")])
+        tmp_img = cv.cvtColor(tmp_img, cv.COLOR_LAB2BGR)
+        cv.imshow(name, tmp_img)
+
+
     for i in tmp():
-        print(1)
+        if i:
+            i = i[0]
+            print("OK")
+            vdl(i[1][0] * 255, i[2][0], i[3][0], "ori")
+            vdl(i[0][0] * 255, i[2][0], i[3][0], "scale")
+            cv.waitKey(0)

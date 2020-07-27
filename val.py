@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from data_reader import reader
 from data_reader import cvt_color
 
-TEST_DATA_PATH = "./data/f"
+TEST_DATA_PATH = "./data/ff"
 MODEL_DIR = "./best_model.color"
 DICT_PATH = "./color_files/Color1D_Base_v2.dict"
 

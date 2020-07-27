@@ -66,14 +66,16 @@ with fluid.program_guard(train_program, start_program):
     loss_l = fluid.layers.mse_loss(signal_l, img_l)
     cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
     cost_b_o = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
-    cost_a_o = fluid.layers.elementwise_mul(cost_a_o, w_a, 1)
-    cost_b_o = fluid.layers.elementwise_mul(cost_b_o, w_b, 1)
-    cost_ab = cost_a_o + cost_b_o
+    cost_a = fluid.layers.elementwise_mul(cost_a_o, w_a, 1)
+    cost_b = fluid.layers.elementwise_mul(cost_b_o, w_b, 1)
+    cost_ab_o = cost_a_o + cost_b_o
+    cost_ab = cost_a + cost_b
     loss_ab = fluid.layers.mean(cost_ab)
+    loss_ab_o = fluid.layers.mean(cost_ab_o)
 
     test_program = train_program.clone(for_test=True)
-    signal_a_out = fluid.layers.argmax(x=signal_a)
-    signal_b_out = fluid.layers.argmax(x=signal_b)
+    signal_a_out = fluid.layers.argmax(x=signal_a, axis=1)
+    signal_b_out = fluid.layers.argmax(x=signal_b, axis=1)
 
     learning_rate = fluid.layers.piecewise_decay(boundaries=BOUNDARIES, values=VALUES)
     decayed_lr = fluid.layers.linear_lr_warmup(learning_rate,
@@ -116,16 +118,16 @@ for epoch in range(EPOCH):
     lr = None
     for data_id, data in enumerate(train_loader()):
         if data_id == 0:
-            print("Epoch", epoch, "data load done")
+            print("\033[0;37;42mEpoch", epoch, "data load done\033[0m")
         start_time = time.time()
         out = exe.run(program=compiled_train_prog,
                       feed=data,
-                      fetch_list=[loss_ab, loss_l, decayed_lr])
+                      fetch_list=[loss_ab_o, loss_l, decayed_lr])
         out_loss_ab.append(out[0][0])
         out_loss_l.append(out[1][0])
         lr = out[2]
         cost_time = time.time() - start_time
-        if data_id % 50 == 0:
+        if data_id % 250 == 249:
             print(epoch,
                   "-",
                   data_id,
@@ -135,18 +137,20 @@ for epoch in range(EPOCH):
                   "\tLR:", lr)
             out_loss_ab = []
             out_loss_l = []
+            print("\033[0;37;41m[WARNING]\tSaving checkpoint... Please don't stop running! \033[0m")
             fluid.io.save(train_program, CHECK_POINT_DIR)
+            print("\033[0;37;42m[INFO]\tDone\033[0m")
         if data_id % 500 == 500 - 1:
             out_loss_ab = []
             out_loss_l = []
             for t_data_id, data_t in enumerate(test_loader()):
                 if t_data_id == 100:
                     break
-                if t_data_id % 10 == 0:
+                if t_data_id % 40 == 0:
                     print("Run test", t_data_id, "%")
                 out = exe.run(program=compiled_test_prog,
                               feed=data_t,
-                              fetch_list=[loss_ab, loss_l])
+                              fetch_list=[loss_ab_o, loss_l])
                 out_loss_ab.append(out[0][0])
                 out_loss_l.append(out[1][0])
             test_loss = sum(out_loss_ab) / len(out_loss_ab)
@@ -158,7 +162,9 @@ for epoch in range(EPOCH):
                                               executor=exe,
                                               main_program=train_program)
 
-            print(epoch,
+            print("\033[0;37;46m",
+                  epoch,
                   "TEST:\t{:.6f}".format(sum(out_loss_ab) / len(out_loss_ab)),
                   "L_PSNR:{:.8f}".format(10 * np.log10(255 * 255 / sum(out_loss_l) / len(out_loss_l))),
-                  "\tMIN LOSS:\t{:.4f}".format(MIN_LOSS))
+                  "\tMIN LOSS:\t{:.4f}".format(MIN_LOSS),
+                  "\033[0m")
