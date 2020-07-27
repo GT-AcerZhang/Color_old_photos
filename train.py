@@ -9,7 +9,7 @@ import numpy as np
 import paddle.fluid as fluid
 
 from models.libs.model_libs import scope
-from models.modeling.l_net import l_net
+from models.modeling.l_net import l_net, encode, decode
 from data_reader import reader
 
 LOAD_CHECKPOINT = False
@@ -24,6 +24,7 @@ PER_MODEL_DIR = os.path.join(ROOT_PATH, "data/unet_coco_v3")
 MODEL_DIR = os.path.join(ROOT_PATH, "best_model.color")
 
 EPOCH = 1
+MAX_ITER_NUM = 1000
 SIGNAL_A_NUM = 19
 SIGNAL_B_NUM = 20
 
@@ -56,12 +57,16 @@ with fluid.program_guard(train_program, start_program):
     im_shape = fluid.layers.shape(resize_l)
     im_shape = fluid.layers.slice(im_shape, axes=[0], starts=[2], ends=[4])
 
+    # 组网
     with scope("signal_l"):
         signal_l = l_net(resize_l, im_shape, 1)
+    encode_data, short_cuts = encode(img_l)
     with scope("signal_a"):
-        signal_a = l_net(img_l, im_shape, SIGNAL_A_NUM) if not FREEZE_PIX else l_net(signal_l, im_shape, SIGNAL_A_NUM)
+        decode_data = decode(encode_data, short_cuts, im_shape)
+        signal_a = fluid.layers.conv2d(decode_data, SIGNAL_A_NUM, 1, 1)
     with scope("signal_b"):
-        signal_b = l_net(img_l, im_shape, SIGNAL_B_NUM) if not FREEZE_PIX else l_net(signal_l, im_shape, SIGNAL_B_NUM)
+        decode_data_b = decode(encode_data, short_cuts, im_shape)
+        signal_b = fluid.layers.conv2d(decode_data, SIGNAL_A_NUM, 1, 1)
 
     loss_l = fluid.layers.mse_loss(signal_l, img_l)
     cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
@@ -112,6 +117,7 @@ if os.path.exists(PER_MODEL_DIR) and LOAD_PER_MODEL:
     fluid.io.load_vars(exe, PER_MODEL_DIR, train_program, predicate=if_exist)
 
 MIN_LOSS = 10.
+ITER_NUM = 0
 for epoch in range(EPOCH):
     out_loss_ab = list()
     out_loss_l = list()
@@ -119,6 +125,10 @@ for epoch in range(EPOCH):
     for data_id, data in enumerate(train_loader()):
         if data_id == 0:
             print("\033[0;37;42mEpoch", epoch, "data load done\033[0m")
+        ITER_NUM += 1
+        if ITER_NUM == MAX_ITER_NUM:
+            exit("\033[0;37;41m程序已成功到达指定iter数量\033[0m")
+            break
         start_time = time.time()
         out = exe.run(program=compiled_train_prog,
                       feed=data,
@@ -168,3 +178,5 @@ for epoch in range(EPOCH):
                   "L_PSNR:{:.8f}".format(10 * np.log10(255 * 255 / sum(out_loss_l) / len(out_loss_l))),
                   "\033[0m\t\033[0;37;42mMIN LOSS:\t{:.4f}".format(MIN_LOSS),
                   "\033[0m")
+    if ITER_NUM == MAX_ITER_NUM:
+        break

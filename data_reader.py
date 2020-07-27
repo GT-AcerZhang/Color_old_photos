@@ -19,7 +19,7 @@ with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
 # 判断Mini Batch数据大小以及图片缩放系数
 if MEMORY_CAPACITY // 16 == 0:
     SAMPLE_NUM = 1
-    RAM_SCALE = 0.9
+    RAM_SCALE = 0.8
 else:
     SAMPLE_NUM = MEMORY_CAPACITY // 16
     RAM_SCALE = 1.
@@ -105,6 +105,8 @@ def make_train_data(sample):
         else:
             r_ori_scale = random.uniform(0.25, 0.9)
             r_scale = random.uniform(0.5, 0.8)
+        sample_h, sample_w = sample.shape[:2]
+        sample = cv.resize(sample, (int(sample_w * RAM_SCALE), int(sample_h * RAM_SCALE)))
         sample_h, sample_w = sample.shape[:2]
         pre_done_img = cv.resize(sample, (
             int(sample_w * r_ori_scale), int(sample_h * r_ori_scale)))
