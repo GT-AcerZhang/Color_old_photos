@@ -1,8 +1,7 @@
 import cv2 as cv
-import numpy as np
 
-DICT_PATH = "./color_files/Color1D_Small.dict"
-IMAGE = "./test2017/000000000275.jpg"
+DICT_PATH = "color_files/Color1D_MAX_STEP.dict"
+IMAGE = "./data/VDL_DATA/000000000311.jpg"
 
 
 def cvt_color(ori_img, color_dict: dict):

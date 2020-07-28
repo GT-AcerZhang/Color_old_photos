@@ -35,10 +35,10 @@ def encode(data):
     short_cuts = []
     with scope("encode"):
         with scope("block1"):
-            data = double_conv(data, 32)
+            data = double_conv(data, 128)
             short_cuts.append(data)
         with scope("block2"):
-            data = down(data, 64)
+            data = down(data, 128)
             short_cuts.append(data)
         with scope("block3"):
             data = down(data, 128)
@@ -59,13 +59,13 @@ def decode(data, short_cuts, im_shape):
             data = up(data, short_cuts[3], 256, i_shape)
         with scope("decode2"):
             i_shape = im_shape / 2 ** 2
-            data = up(data, short_cuts[2], 64, i_shape)
+            data = up(data, short_cuts[2], 128, i_shape)
         with scope("decode3"):
             i_shape = im_shape / 2 ** 1
-            data = up(data, short_cuts[1], 64, i_shape)
+            data = up(data, short_cuts[1], 128, i_shape)
         with scope("decode4"):
             i_shape = im_shape / 2 ** 0
-            data = up(data, short_cuts[0], 32, i_shape)
+            data = up(data, short_cuts[0], 128, i_shape)
     return data
 
 

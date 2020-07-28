@@ -10,7 +10,7 @@ DEBUG = False
 CPU_NUM = 4  # CPU 队列数 不推荐过高
 MAX_BATCH_SIZE = 4  # BATCH SIZE 阈值，16G显存推荐为2
 MEMORY_CAPACITY = 15.9  # 硬件会保留部分显存，此处为可用内存大小，单位GB
-DICT_FILE_PATH = "./color_files/Color1D_Base_v2.dict"  # 颜色空间文件
+DICT_FILE_PATH = "./color_files/Color1D_MAX_STEP.dict"  # 颜色空间文件
 
 # 读取颜色空间字典
 with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
@@ -75,13 +75,15 @@ def req_weight(im):
     获取颜色权重
     :return: 将颜色值转换为权重值，默认最低权重值为0.0001
     """
-    h, w = im.shape[:2]
     count = np.histogram(im, 256, range=(0, 256))[0].astype("float32")
-    count_t = 1 - (count / (h * w))
-    count_t = np.maximum(count_t, 0.001)
+    min2 = np.sort(count[count > 0])[0]
+    count[count == 0] = 1.
+    count_t = np.reciprocal(count)
+    count_t *= min2
+    count_t = np.maximum(count_t, 0.000001)
     color_map = dict([(k, v) for k, v in zip(range(256), count_t)])
     im_w = cvt_color(im.astype("float32"), color_map)
-    im_w /= np.max(im_w)
+    # im_w /= np.max(im_w)
     return im_w
 
 
@@ -89,6 +91,7 @@ def make_train_data(sample):
     sample, is_test = sample
     tmp_cvt_l_label = []
     tmp_cvt_l = []
+    tmp_cvt_l2 = []
     tmp_cvt_a = []
     tmp_cvt_b = []
     tmp_w_a = []
@@ -117,11 +120,17 @@ def make_train_data(sample):
 
         # 压缩颜色空间
         cvt_l, cvt_a, cvt_b = cvt_process(pre_done_img, c_dict)
+        cvt_l2 = cv.resize(cvt_a, (256, 256), interpolation=cv.INTER_NEAREST)
+        cvt_a = cv.resize(cvt_a, (256, 256), interpolation=cv.INTER_NEAREST)
+        cvt_b = cv.resize(cvt_b, (256, 256), interpolation=cv.INTER_NEAREST)
 
         # 生成低分辨率图像
-        cvt_l_label = cv.resize(cvt_l, (
-            int(pre_done_img.shape[1] * r_scale), int(pre_done_img.shape[0] * r_scale)))
-        cvt_l_label = cv.resize(cvt_l_label, (pre_done_img.shape[1], pre_done_img.shape[0]))
+        cvt_l_label = cv.resize(cvt_l,
+                                (int(pre_done_img.shape[1] * r_scale), int(pre_done_img.shape[0] * r_scale)),
+                                interpolation=cv.INTER_NEAREST)
+        cvt_l_label = cv.resize(cvt_l_label,
+                                (pre_done_img.shape[1], pre_done_img.shape[0]),
+                                interpolation=cv.INTER_NEAREST)
 
         tmp_w_a_array = [req_weight(cvt_a)]
         tmp_w_b_array = [req_weight(cvt_b)]
@@ -130,6 +139,7 @@ def make_train_data(sample):
             if mode == -2 or is_test:
                 tmp_cvt_l_label.append([cvt_l_label])
                 tmp_cvt_l.append([cvt_l])
+                tmp_cvt_l2.append([cvt_l2])
                 tmp_cvt_a.append([cvt_a])
                 tmp_cvt_b.append([cvt_b])
                 if is_test:
@@ -138,6 +148,7 @@ def make_train_data(sample):
                     break
             else:
                 tmp_cvt_l_label.append([cv.flip(cvt_l_label, mode)])
+                tmp_cvt_l2.append([cv.flip(cvt_l2, mode)])
                 tmp_cvt_l.append([cv.flip(cvt_l, mode)])
                 tmp_cvt_a.append([cv.flip(cvt_a, mode)])
                 tmp_cvt_b.append([cv.flip(cvt_b, mode)])
@@ -146,6 +157,7 @@ def make_train_data(sample):
 
     cvt_l_label = np.array(tmp_cvt_l_label).astype("float32")
     cvt_l = np.array(tmp_cvt_l).astype("float32")
+    cvt_l2 = np.array(tmp_cvt_l2).astype("float32")
     cvt_a = np.array(tmp_cvt_a).astype("int64")
     cvt_b = np.array(tmp_cvt_b).astype("int64")
     w_a = np.array(tmp_w_a).astype("float32")
@@ -154,7 +166,14 @@ def make_train_data(sample):
     for index in range(SAMPLE_NUM * 4):
         if index == MAX_BATCH_SIZE:
             break
-        pack.append((cvt_l_label[index] / 255, cvt_l[index] / 255, cvt_a[index], cvt_b[index], w_a[index], w_b[index]))
+        pack.append((
+            cvt_l_label[index] / 255,
+            cvt_l[index] / 255,
+            cvt_l2[index] / 255,
+            cvt_a[index],
+            cvt_b[index],
+            w_a[index],
+            w_b[index]))
         if is_test:
             break
     return pack
@@ -197,9 +216,12 @@ if __name__ == '__main__':
 
 
     def vdl(l_vdl, a_vdl, b_vdl, name):
+        vdl_h, vdl_w = l_vdl.shape[:2]
         a_vdl = cvt_color(a_vdl, a_dict_vdl)
         b_vdl = cvt_color(b_vdl, b_dict_vdl)
-        tmp_img = cv.merge([l_vdl.astype("uint8"), a_vdl.astype("uint8"), b_vdl.astype("uint8")])
+        tmp_img = cv.merge([l_vdl.astype("uint8"),
+                            cv.resize(a_vdl.astype("uint8"), (vdl_w, vdl_h), interpolation=cv.INTER_NEAREST),
+                            cv.resize(b_vdl.astype("uint8"), (vdl_w, vdl_h), interpolation=cv.INTER_NEAREST)])
         tmp_img = cv.cvtColor(tmp_img, cv.COLOR_LAB2BGR)
         cv.imshow(name, tmp_img)
 
@@ -208,6 +230,6 @@ if __name__ == '__main__':
         if i:
             i = i[0]
             print("OK")
-            vdl(i[1][0] * 255, i[2][0], i[3][0], "ori")
-            vdl(i[0][0] * 255, i[2][0], i[3][0], "scale")
+            vdl(i[1][0] * 255, i[3][0], i[4][0], "ori")
+            vdl(i[0][0] * 255, i[3][0], i[4][0], "scale")
             cv.waitKey(0)

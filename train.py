@@ -24,12 +24,12 @@ PER_MODEL_DIR = os.path.join(ROOT_PATH, "data/unet_coco_v3")
 MODEL_DIR = os.path.join(ROOT_PATH, "best_model.color")
 
 EPOCH = 1
-MAX_ITER_NUM = 1000
-SIGNAL_A_NUM = 19
-SIGNAL_B_NUM = 20
+MAX_ITER_NUM = 100000
+SIGNAL_A_NUM = 9
+SIGNAL_B_NUM = 11
 
 BOUNDARIES = [10000, 15000, 50000, 100000]
-VALUES = [0.001, 0.00005, 0.00001, 0.000005, 0.000001]
+VALUES = [0.0001, 0.00005, 0.00001, 0.000005, 0.000001]
 WARM_UP_STEPS = 500
 START_LR = 0.005
 END_LR = 0.01
@@ -48,6 +48,7 @@ with fluid.program_guard(train_program, start_program):
 
     # LAB三通道
     img_l = fluid.data(name="img_l", shape=[-1, 1, -1, -1])
+    img_l2 = fluid.data(name="img_l2", shape=[-1, 1, -1, -1])
     label_a = fluid.data(name="label_a", shape=[-1, 1, -1, -1], dtype="int64")
     label_b = fluid.data(name="label_b", shape=[-1, 1, -1, -1], dtype="int64")
     w_a = fluid.data(name="w_a", shape=[-1, 1, -1, -1])
@@ -56,21 +57,23 @@ with fluid.program_guard(train_program, start_program):
     # 获得shape参数
     im_shape = fluid.layers.shape(resize_l)
     im_shape = fluid.layers.slice(im_shape, axes=[0], starts=[2], ends=[4])
+    im_shape2 = fluid.layers.shape(img_l2)
+    im_shape2 = fluid.layers.slice(im_shape2, axes=[0], starts=[2], ends=[4])
 
     # 组网
     with scope("signal_l"):
         signal_l = l_net(resize_l, im_shape, 1)
-    encode_data, _ = encode(img_l)
+    encode_data, _ = encode(img_l2)
     with scope("signal_a"):
-        encode_data_a, short_cuts_a = encode(img_l)
+        encode_data_a, short_cuts_a = encode(img_l2)
         encode_data_a = fluid.layers.concat([encode_data, encode_data_a], axis=1)
-        decode_data_a = decode(encode_data_a, short_cuts_a, im_shape)
+        decode_data_a = decode(encode_data_a, short_cuts_a, im_shape2)
         signal_a = fluid.layers.conv2d(decode_data_a, SIGNAL_A_NUM, 1, 1)
     with scope("signal_b"):
-        encode_data_b, short_cuts_b = encode(img_l)
+        encode_data_b, short_cuts_b = encode(img_l2)
         encode_data_b = fluid.layers.concat([encode_data, encode_data_b], axis=1)
-        decode_data_b = decode(encode_data_b, short_cuts_b, im_shape)
-        signal_b = fluid.layers.conv2d(decode_data_a, SIGNAL_A_NUM, 1, 1)
+        decode_data_b = decode(encode_data_b, short_cuts_b, im_shape2)
+        signal_b = fluid.layers.conv2d(decode_data_b, SIGNAL_B_NUM, 1, 1)
 
     loss_l = fluid.layers.mse_loss(signal_l, img_l)
     cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
@@ -83,8 +86,12 @@ with fluid.program_guard(train_program, start_program):
     loss_ab_o = fluid.layers.mean(cost_ab_o)
 
     test_program = train_program.clone(for_test=True)
-    signal_a_out = fluid.layers.argmax(x=signal_a, axis=1)
-    signal_b_out = fluid.layers.argmax(x=signal_b, axis=1)
+    signal_a = fluid.layers.resize_nearest(signal_a, im_shape)
+    signal_b = fluid.layers.resize_nearest(signal_b, im_shape)
+    signal_a_out = fluid.layers.transpose(signal_a, [0, 2, 3, 1])
+    signal_b_out = fluid.layers.transpose(signal_b, [0, 2, 3, 1])
+    signal_a_out = fluid.layers.argmax(x=signal_a_out, axis=-1)
+    signal_b_out = fluid.layers.argmax(x=signal_b_out, axis=-1)
 
     learning_rate = fluid.layers.piecewise_decay(boundaries=BOUNDARIES, values=VALUES)
     decayed_lr = fluid.layers.linear_lr_warmup(learning_rate,
@@ -96,10 +103,10 @@ with fluid.program_guard(train_program, start_program):
     opt.minimize(loss_sum)
 
 train_feeder = fluid.DataFeeder(place=place,
-                                feed_list=[resize_l, img_l, label_a, label_b, w_a, w_b],
+                                feed_list=[resize_l, img_l, img_l2, label_a, label_b, w_a, w_b],
                                 program=train_program)
 test_feeder = fluid.DataFeeder(place=place,
-                               feed_list=[resize_l, img_l, label_a, label_b, w_a, w_b],
+                               feed_list=[resize_l, img_l, img_l2, label_a, label_b, w_a, w_b],
                                program=test_program)
 train_loader = train_feeder.decorate_reader(reader(TRAIN_DATA_PATH), multi_devices=True)
 test_loader = test_feeder.decorate_reader(reader(TEST_DATA_PATH, is_test=True), multi_devices=True)
@@ -131,7 +138,7 @@ for epoch in range(EPOCH):
             print("\033[0;37;42mEpoch", epoch, "data load done\033[0m")
         ITER_NUM += 1
         if ITER_NUM == MAX_ITER_NUM:
-            exit("\033[0;37;41m程序已成功到达指定iter数量\033[0m")
+            print("\033[0;37;41m程序已成功到达指定iter数量\033[0m")
             break
         start_time = time.time()
         out = exe.run(program=compiled_train_prog,
@@ -158,7 +165,7 @@ for epoch in range(EPOCH):
             out_loss_ab = []
             out_loss_l = []
             for t_data_id, data_t in enumerate(test_loader()):
-                if t_data_id == 100:
+                if t_data_id == 200:
                     break
                 if t_data_id % 40 == 0:
                     print("Run test", t_data_id, "%")
@@ -171,7 +178,7 @@ for epoch in range(EPOCH):
             if test_loss <= MIN_LOSS:
                 MIN_LOSS = test_loss
                 fluid.io.save_inference_model(dirname=MODEL_DIR,
-                                              feeded_var_names=["img_l", "resize_l"],
+                                              feeded_var_names=["img_l2", "resize_l"],
                                               target_vars=[signal_l, signal_a_out, signal_b_out],
                                               executor=exe,
                                               main_program=train_program)
