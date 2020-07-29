@@ -11,7 +11,7 @@ from data_reader import cvt_color
 
 TEST_DATA_PATH = "./data/ff"
 MODEL_DIR = "./best_model.color"
-DICT_PATH = "./color_files/Color1D_Base_v2.dict"
+DICT_PATH = "./color_files/Color1D_MAX_STEP.dict"
 
 with open(DICT_PATH, "r", encoding="utf-8") as f:
     a_dict, b_dict = eval(f.read())[1]

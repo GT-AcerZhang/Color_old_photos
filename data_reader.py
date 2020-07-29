@@ -8,8 +8,8 @@ import cv2 as cv
 
 DEBUG = False
 CPU_NUM = 4  # CPU 队列数 不推荐过高
-MAX_BATCH_SIZE = 4  # BATCH SIZE 阈值，16G显存推荐为2
-MEMORY_CAPACITY = 15.9  # 硬件会保留部分显存，此处为可用内存大小，单位GB
+MAX_BATCH_SIZE = 1  # BATCH SIZE 阈值，16G显存推荐为2
+MEMORY_CAPACITY = 16.0  # 硬件会保留部分显存，此处为可用内存大小，单位GB
 DICT_FILE_PATH = "./color_files/Color1D_MAX_STEP.dict"  # 颜色空间文件
 
 # 读取颜色空间字典
@@ -21,7 +21,7 @@ if MEMORY_CAPACITY // 16 == 0:
     SAMPLE_NUM = 1
     RAM_SCALE = 0.8
 else:
-    SAMPLE_NUM = MEMORY_CAPACITY // 16
+    SAMPLE_NUM = int(MEMORY_CAPACITY // 16)
     RAM_SCALE = 1.
 
 
@@ -163,13 +163,13 @@ def make_train_data(sample):
     w_a = np.array(tmp_w_a).astype("float32")
     w_b = np.array(tmp_w_b).astype("float32")
     pack = []
-    for index in range(SAMPLE_NUM * 4):
+    for index in range(int(SAMPLE_NUM * 4)):
         if index == MAX_BATCH_SIZE:
             break
         pack.append((
-            cvt_l_label[index] / 255,
-            cvt_l[index] / 255,
-            cvt_l2[index] / 255,
+            (cvt_l_label[index] - 128) / 128,
+            (cvt_l[index] - 128) / 128,
+            (cvt_l2[index] - 128) / 128,
             cvt_a[index],
             cvt_b[index],
             w_a[index],
@@ -190,7 +190,8 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False):
             if is_infer:
                 try:
                     ori_img = cv.imread(os.path.join(data_path, file_name))
-                    l_img = cv.cvtColor(ori_img, cv.COLOR_BGR2GRAY)
+                    l_img = cv.cvtColor(ori_img, cv.COLOR_BGR2LAB)
+                    l_img, _, _ = cv.split(l_img)
                     l_img = np.array([[l_img]]).astype("float32") / 255
                     yield l_img
                 except Exception:
@@ -230,6 +231,6 @@ if __name__ == '__main__':
         if i:
             i = i[0]
             print("OK")
-            vdl(i[1][0] * 255, i[3][0], i[4][0], "ori")
-            vdl(i[0][0] * 255, i[3][0], i[4][0], "scale")
+            vdl(i[1][0] * 128 + 128, i[3][0], i[4][0], "ori")
+            vdl(i[0][0] * 128 + 128, i[3][0], i[4][0], "scale")
             cv.waitKey(0)

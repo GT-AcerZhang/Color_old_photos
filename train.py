@@ -76,10 +76,24 @@ with fluid.program_guard(train_program, start_program):
         signal_b = fluid.layers.conv2d(decode_data_b, SIGNAL_B_NUM, 1, 1)
 
     loss_l = fluid.layers.mse_loss(signal_l, img_l)
-    cost_a_o = fluid.layers.softmax_with_cross_entropy(signal_a, label_a, axis=1)
-    cost_b_o = fluid.layers.softmax_with_cross_entropy(signal_b, label_b, axis=1)
-    cost_a = fluid.layers.elementwise_mul(cost_a_o, w_a, 1)
-    cost_b = fluid.layers.elementwise_mul(cost_b_o, w_b, 1)
+    signal_a2c = fluid.layers.transpose(signal_a, [0, 2, 3, 1])
+    signal_b2c = fluid.layers.transpose(signal_b, [0, 2, 3, 1])
+    signal_a2c = fluid.layers.reshape(signal_a2c, shape=[-1, 256 * 256, SIGNAL_A_NUM])
+    signal_b2c = fluid.layers.reshape(signal_b2c, shape=[-1, 256 * 256, SIGNAL_B_NUM])
+    signal_a2c = fluid.layers.softmax(signal_a2c, axis=2)
+    signal_b2c = fluid.layers.softmax(signal_b2c, axis=2)
+    label_a2c = fluid.layers.transpose(label_a, [0, 2, 3, 1])
+    label_b2c = fluid.layers.transpose(label_b, [0, 2, 3, 1])
+    label_a2c = fluid.layers.reshape(label_a2c, shape=[-1, 256 * 256, 1])
+    label_b2c = fluid.layers.reshape(label_b2c, shape=[-1, 256 * 256, 1])
+    cost_a_o = fluid.layers.cross_entropy(signal_a2c, label_a2c)
+    cost_b_o = fluid.layers.cross_entropy(signal_b2c, label_b2c)
+    w_a2c = fluid.layers.transpose(w_a, [0, 2, 3, 1])
+    w_b2c = fluid.layers.transpose(w_b, [0, 2, 3, 1])
+    w_a2c = fluid.layers.reshape(w_a2c, shape=[-1, 256 * 256, 1])
+    w_b2c = fluid.layers.reshape(w_b2c, shape=[-1, 256 * 256, 1])
+    cost_a = fluid.layers.elementwise_mul(cost_a_o, w_a2c)
+    cost_b = fluid.layers.elementwise_mul(cost_b_o, w_b2c)
     cost_ab_o = cost_a_o + cost_b_o
     cost_ab = cost_a + cost_b
     loss_ab = fluid.layers.mean(cost_ab)
@@ -100,7 +114,8 @@ with fluid.program_guard(train_program, start_program):
                                                END_LR)
     opt = fluid.optimizer.Adam(decayed_lr)
     loss_sum = loss_l + loss_ab
-    opt.minimize(loss_sum)
+    opt.minimize(loss_l)
+    opt.minimize(loss_ab)
 
 train_feeder = fluid.DataFeeder(place=place,
                                 feed_list=[resize_l, img_l, img_l2, label_a, label_b, w_a, w_b],
@@ -161,14 +176,13 @@ for epoch in range(EPOCH):
             print("\033[0;37;41m[WARNING]\tSaving checkpoint... Please don't stop running! \033[0m")
             fluid.io.save(train_program, CHECK_POINT_DIR)
             print("\033[0;37;42m[INFO]\tDone\033[0m")
-        if data_id % 500 == 500 - 1:
+        if data_id % 1500 == 1500 - 1:
             out_loss_ab = []
             out_loss_l = []
+            print("Run test...")
             for t_data_id, data_t in enumerate(test_loader()):
                 if t_data_id == 200:
                     break
-                if t_data_id % 40 == 0:
-                    print("Run test", t_data_id, "%")
                 out = exe.run(program=compiled_test_prog,
                               feed=data_t,
                               fetch_list=[loss_ab_o, loss_l])
