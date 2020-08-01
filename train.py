@@ -198,4 +198,4 @@ for epoch in range(EPOCH):
                   "\tMETRIC([L]PSNR | [AB]ACC):{:.6f}".format(
                       10 * np.log10(255 * 255 / sum(out_metric) / len(out_metric)) if MODE == "L"
                       else avg_metric),
-                  "\tBEST METRIC", avg_metric)
+                  "\tBEST METRIC", BEST_METRIC)
