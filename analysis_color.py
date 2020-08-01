@@ -12,8 +12,8 @@ MAX_STEP = 15  # 最大步长，越低效果越好
 MIN_STEP = 10  # 最低步长
 IMG_BLOCK = 10000  # 图片采样数，越高越好 - 统计速度变慢
 R_IMG_SIZE = (256, 256)  # 采样分辨率，越高越好 - 可能出现爆炸现象 - 性价比较低
-IMAGE_DIR_PATH = "./test2017"
-FILE_NAME = "color_files/Color1D_Base_V2"
+IMAGE_DIR_PATH = "./val2017"
+FILE_NAME = "color_files/Color1D_Best2"
 
 
 def analysis1d(signal, step):
@@ -48,11 +48,12 @@ def analysis1d(signal, step):
             end += 1
     w_list = np.array(w_list)
     w_list[w_list == 0] = 1.
+    acc = np.max(w_list) / np.sum(w_list)
     w_list_t = np.reciprocal(w_list)
     w_max = np.sort(w_list_t[w_list_t < 1.])[-1]
     w_list_t /= w_max
     w_list_t = np.round(np.minimum(w_list_t, 5.0), 7).tolist()
-    return block_dict, color_dict, label + 1, w_list_t
+    return block_dict, color_dict, label + 1, w_list_t, acc
 
 
 print("开始统计颜色信号...")
@@ -86,12 +87,14 @@ b_step = np.sum(signal_cache_b) / BLOCK_SIZE1D
 
 print("正在生成字典...")
 
-a_dict, al_dict, a_num, a_w = analysis1d(signal_cache_a, a_step)
-b_dict, bl_dict, b_num, b_w = analysis1d(signal_cache_b, b_step)
+a_dict, al_dict, a_num, a_w, a_acc = analysis1d(signal_cache_a, a_step)
+b_dict, bl_dict, b_num, b_w, b_acc = analysis1d(signal_cache_b, b_step)
 print("写入硬盘...")
 with open("./" + FILE_NAME + ".dict", "w", encoding="utf-8") as f:
     f.write(str({"2mini": [a_dict, b_dict], "2ori": [al_dict, bl_dict], "weight": [a_w, b_w]}))
 with open("./" + FILE_NAME + "_" + str(a_num * b_num) + ".info", "w", encoding="utf-8") as f:
-    f.write("分类数为:" + str(a_num * b_num) + "\tA:" + str(a_num) + "\tB:" + str(b_num) + "\nBLOCK_SIZE1D:" +
-            str(BLOCK_SIZE1D) + "\tMAX_STEP:" + str(MAX_STEP) + "\tMIN_STEP:" + str(MIN_STEP))
+    f.write("分类数为:" + str(a_num * b_num) + "\t(A)" + str(a_num) + "\t(B)" + str(b_num) + "\nBLOCK_SIZE1D:" +
+            str(BLOCK_SIZE1D) + "\tMAX_STEP:" + str(MAX_STEP) + "\tMIN_STEP:" + str(MIN_STEP) +
+            "\nMIN_ACC:(A)" + str(a_acc) + "\t(B)" + str(b_acc))
     print("已保存至./Color1D.dict \n分类数为:", a_num * b_num, "\tA:", a_num, "\tB:", b_num)
+    print("混乱度：", a_acc * b_acc * 100 * 100, "\tA/B:", a_acc, b_acc)

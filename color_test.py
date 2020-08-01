@@ -1,7 +1,7 @@
 import cv2 as cv
 
-DICT_PATH = "color_files/Color1D_MAX_STEP.dict"
-IMAGE = "./data/VDL_DATA/000000000311.jpg"
+DICT_PATH = "color_files/Color1D_Base_V2.dict"
+IMAGE = r"D:\img_fix\data\f\000000000139.jpg"
 
 
 def cvt_color(ori_img, color_dict: dict):
@@ -22,9 +22,9 @@ def cvt_process(ori_img, color_dict):
 
 
 with open(DICT_PATH, "r", encoding="utf-8") as f:
-    aaa = f.read()
-    c_d = eval(aaa)[0]
-    a_dict1, b_dict1 = eval(aaa)[1]
+    info = f.read()
+    c_d = eval(info)['2mini']
+    a_dict1, b_dict1 = eval(info)["2ori"]
 
 IM_SIZE = [256] * 2
 

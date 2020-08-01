@@ -11,6 +11,7 @@ CPU_NUM = 4  # CPU 队列数 不推荐过高
 MAX_BATCH_SIZE = 4  # BATCH SIZE 阈值，16G显存推荐为2
 MEMORY_CAPACITY = 16.0  # 硬件会保留部分显存，此处为可用内存大小，单位GB
 DICT_FILE_PATH = "./color_files/Color1D_Base_V2.dict"  # 颜色空间文件
+RESIZE = 256
 
 # 读取颜色空间字典
 with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
@@ -25,6 +26,10 @@ if MEMORY_CAPACITY // 16 == 0:
 else:
     SAMPLE_NUM = int(MEMORY_CAPACITY // 16)
     RAM_SCALE = 1.
+
+
+def get_resize():
+    return RESIZE
 
 
 def check_gray(ipt):
@@ -120,9 +125,9 @@ def make_train_data(sample):
 
         # 压缩颜色空间
         cvt_l, cvt_a, cvt_b = cvt_process(pre_done_img, c_dict)
-        cvt_l2 = cv.resize(cvt_a, (256, 256), interpolation=cv.INTER_NEAREST)
-        cvt_a = cv.resize(cvt_a, (256, 256), interpolation=cv.INTER_NEAREST)
-        cvt_b = cv.resize(cvt_b, (256, 256), interpolation=cv.INTER_NEAREST)
+        cvt_l2 = cv.resize(cvt_l, (RESIZE, RESIZE), interpolation=cv.INTER_NEAREST)
+        cvt_a = cv.resize(cvt_a, (RESIZE, RESIZE), interpolation=cv.INTER_NEAREST)
+        cvt_b = cv.resize(cvt_b, (RESIZE, RESIZE), interpolation=cv.INTER_NEAREST)
 
         # 生成低分辨率图像
         cvt_l_label = cv.resize(cvt_l,
@@ -134,9 +139,11 @@ def make_train_data(sample):
 
         # 数据增强 - 翻转
         for mode in random.sample([-1, 0, 1, -2], 4):
-            if freeze_pix:
+            if freeze_pix == "A":
                 return (np.array([cvt_l2]).astype("float32") - 128) / 128, \
-                       np.array([cvt_a]).astype("int64"), \
+                       np.array([cvt_a]).astype("int64")
+            elif freeze_pix == "B":
+                return (np.array([cvt_l2]).astype("float32") - 128) / 128, \
                        np.array([cvt_b]).astype("int64")
             if mode == -2 or is_test:
                 tmp_cvt_l_label.append([cvt_l_label])
@@ -174,7 +181,7 @@ def make_train_data(sample):
     return pack
 
 
-def reader(data_path, is_test: bool = False, is_infer: bool = False, freeze_pix: bool = False):
+def reader(data_path, is_test: bool = False, is_infer: bool = False, freeze_pix="L"):
     file_names = os.listdir(data_path)
 
     def _reader():
@@ -218,7 +225,7 @@ def get_class_num():
 
 
 if __name__ == '__main__':
-    tmp = reader("data/ff", is_test=True, freeze_pix=True)
+    tmp = reader("data/f", is_test=True, freeze_pix="A")
     with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
         a_dict_vdl, b_dict_vdl = eval(f.read())["2ori"]
 
