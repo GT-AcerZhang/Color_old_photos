@@ -11,10 +11,10 @@ from data_reader import cvt_color
 
 TEST_DATA_PATH = "./data/ff"
 MODEL_DIR = "./best_model.color"
-DICT_PATH = "./color_files/Color1D_MAX_STEP.dict"
+DICT_PATH = "./color_files/Color1D_Base_V2.dict"
 
 with open(DICT_PATH, "r", encoding="utf-8") as f:
-    a_dict, b_dict = eval(f.read())[1]
+    a_dict, b_dict = eval(f.read())["2ori"]
 
 
 def visual_img(l, a, b, name):
@@ -36,6 +36,6 @@ for data in reader():
     ori_l = data[0]
     out = exe.run(program, feed={feed_list[0]: data, feed_list[1]: data}, fetch_list=target_list)
     signal_l, signal_a_out, signal_b_out = out
-    visual_img(signal_l[0][0] * 255, signal_a_out[0], signal_b_out[0], "all")
-    visual_img(ori_l[0] * 255, signal_a_out[0], signal_b_out[0], "ori_l")
+    visual_img(signal_l[0][0] * 128 + 128, signal_a_out[0], signal_b_out[0], "all")
+    visual_img(ori_l[0] * 128 + 128, signal_a_out[0], signal_b_out[0], "ori_l")
     cv.waitKey(0)

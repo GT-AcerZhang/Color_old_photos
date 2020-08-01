@@ -5,12 +5,17 @@ from models.libs.model_libs import conv, max_pool
 
 
 def double_conv(data, out_ch):
+    param_attr = fluid.ParamAttr(
+        name='weights',
+        regularizer=fluid.regularizer.L2DecayRegularizer(
+            regularization_coeff=0.0),
+        initializer=fluid.initializer.TruncatedNormal(loc=0.0, scale=0.33))
     with scope("conv0"):
         data = bn_relu(
-            conv(data, out_ch, 3, stride=1, padding=1))
+            conv(data, out_ch, 3, stride=1, padding=1, param_attr=param_attr))
     with scope("conv1"):
         data = bn_relu(
-            conv(data, out_ch, 3, stride=1, padding=1))
+            conv(data, out_ch, 3, stride=1, padding=1, param_attr=param_attr))
     return data
 
 
@@ -24,7 +29,7 @@ def down(data, out_ch):
 
 def up(data, short_cut, out_ch, im_shape):
     with scope("up"):
-        data = fluid.layers.resize_bilinear(data, out_shape=im_shape)
+        data = fluid.layers.resize_nearest(data, out_shape=im_shape)
         data = fluid.layers.concat([data, short_cut], axis=1)
         data = double_conv(data, out_ch)
     return data

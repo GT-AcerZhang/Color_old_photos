@@ -8,13 +8,15 @@ import cv2 as cv
 
 DEBUG = False
 CPU_NUM = 4  # CPU 队列数 不推荐过高
-MAX_BATCH_SIZE = 1  # BATCH SIZE 阈值，16G显存推荐为2
+MAX_BATCH_SIZE = 4  # BATCH SIZE 阈值，16G显存推荐为2
 MEMORY_CAPACITY = 16.0  # 硬件会保留部分显存，此处为可用内存大小，单位GB
-DICT_FILE_PATH = "./color_files/Color1D_MAX_STEP.dict"  # 颜色空间文件
+DICT_FILE_PATH = "./color_files/Color1D_Base_V2.dict"  # 颜色空间文件
 
 # 读取颜色空间字典
 with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
-    c_dict = eval(f.read())[0]
+    dict_info = eval(f.read())
+    c_dict = dict_info["2mini"]
+    w_dict = dict_info["weight"]
 
 # 判断Mini Batch数据大小以及图片缩放系数
 if MEMORY_CAPACITY // 16 == 0:
@@ -88,14 +90,12 @@ def req_weight(im):
 
 
 def make_train_data(sample):
-    sample, is_test = sample
+    sample, is_test, freeze_pix = sample
     tmp_cvt_l_label = []
     tmp_cvt_l = []
     tmp_cvt_l2 = []
     tmp_cvt_a = []
     tmp_cvt_b = []
-    tmp_w_a = []
-    tmp_w_b = []
     if is_test:
         sample_num = 1
     else:
@@ -132,10 +132,12 @@ def make_train_data(sample):
                                 (pre_done_img.shape[1], pre_done_img.shape[0]),
                                 interpolation=cv.INTER_NEAREST)
 
-        tmp_w_a_array = [req_weight(cvt_a)]
-        tmp_w_b_array = [req_weight(cvt_b)]
         # 数据增强 - 翻转
         for mode in random.sample([-1, 0, 1, -2], 4):
+            if freeze_pix:
+                return (np.array([cvt_l2]).astype("float32") - 128) / 128, \
+                       np.array([cvt_a]).astype("int64"), \
+                       np.array([cvt_b]).astype("int64")
             if mode == -2 or is_test:
                 tmp_cvt_l_label.append([cvt_l_label])
                 tmp_cvt_l.append([cvt_l])
@@ -143,8 +145,6 @@ def make_train_data(sample):
                 tmp_cvt_a.append([cvt_a])
                 tmp_cvt_b.append([cvt_b])
                 if is_test:
-                    tmp_w_a.append(tmp_w_a_array)
-                    tmp_w_b.append(tmp_w_b_array)
                     break
             else:
                 tmp_cvt_l_label.append([cv.flip(cvt_l_label, mode)])
@@ -152,34 +152,29 @@ def make_train_data(sample):
                 tmp_cvt_l.append([cv.flip(cvt_l, mode)])
                 tmp_cvt_a.append([cv.flip(cvt_a, mode)])
                 tmp_cvt_b.append([cv.flip(cvt_b, mode)])
-            tmp_w_a.append(tmp_w_a_array)
-            tmp_w_b.append(tmp_w_b_array)
 
     cvt_l_label = np.array(tmp_cvt_l_label).astype("float32")
     cvt_l = np.array(tmp_cvt_l).astype("float32")
     cvt_l2 = np.array(tmp_cvt_l2).astype("float32")
     cvt_a = np.array(tmp_cvt_a).astype("int64")
     cvt_b = np.array(tmp_cvt_b).astype("int64")
-    w_a = np.array(tmp_w_a).astype("float32")
-    w_b = np.array(tmp_w_b).astype("float32")
     pack = []
+
     for index in range(int(SAMPLE_NUM * 4)):
         if index == MAX_BATCH_SIZE:
             break
-        pack.append((
-            (cvt_l_label[index] - 128) / 128,
-            (cvt_l[index] - 128) / 128,
-            (cvt_l2[index] - 128) / 128,
-            cvt_a[index],
-            cvt_b[index],
-            w_a[index],
-            w_b[index]))
+        pack_t = ((cvt_l_label[index] - 128) / 128,
+                  (cvt_l[index] - 128) / 128,
+                  (cvt_l2[index] - 128) / 128,
+                  cvt_a[index],
+                  cvt_b[index])
+        pack.append(pack_t)
         if is_test:
             break
     return pack
 
 
-def reader(data_path, is_test: bool = False, is_infer: bool = False):
+def reader(data_path, is_test: bool = False, is_infer: bool = False, freeze_pix: bool = False):
     file_names = os.listdir(data_path)
 
     def _reader():
@@ -205,15 +200,27 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False):
                         print(file_name, "like L mode, so skip it")
                     continue
                 else:
-                    yield ori_img, is_test
+                    yield ori_img, is_test, freeze_pix
 
     return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, CPU_NUM * 4) if not is_infer else _reader
 
 
+def get_weight():
+    a_w, b_w = w_dict
+    a_w = np.array(a_w).astype("float32")
+    b_w = np.array(b_w).astype("float32")
+    return a_w, b_w
+
+
+def get_class_num():
+    a_w, b_w = w_dict
+    return len(a_w), len(b_w)
+
+
 if __name__ == '__main__':
-    tmp = reader("data/ff", is_test=True)
+    tmp = reader("data/ff", is_test=True, freeze_pix=True)
     with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
-        a_dict_vdl, b_dict_vdl = eval(f.read())[1]
+        a_dict_vdl, b_dict_vdl = eval(f.read())["2ori"]
 
 
     def vdl(l_vdl, a_vdl, b_vdl, name):
@@ -227,6 +234,10 @@ if __name__ == '__main__':
         cv.imshow(name, tmp_img)
 
 
+    tmp_c = get_class_num()
+    tmp_w = get_weight()
+    print("Class_num", tmp_c)
+    print("Weight", tmp_w)
     for i in tmp():
         if i:
             i = i[0]
