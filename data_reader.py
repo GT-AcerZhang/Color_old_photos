@@ -8,9 +8,9 @@ import cv2 as cv
 
 DEBUG = False
 CPU_NUM = 4  # CPU 队列数 不推荐过高
-MAX_BATCH_SIZE = 2  # BATCH SIZE 阈值，16G显存推荐为2
-MEMORY_CAPACITY = 15.9  # 硬件会保留部分显存，此处为可用内存大小，单位GB
-DICT_FILE_PATH = "./color_files/Color1D_Base_v2.dict"  # 颜色空间文件
+MAX_BATCH_SIZE = 1  # BATCH SIZE 阈值，16G显存推荐为2
+MEMORY_CAPACITY = 16.0  # 硬件会保留部分显存，此处为可用内存大小，单位GB
+DICT_FILE_PATH = "./color_files/Color1D_MAX_STEP.dict"  # 颜色空间文件
 
 # 读取颜色空间字典
 with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
@@ -19,9 +19,9 @@ with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
 # 判断Mini Batch数据大小以及图片缩放系数
 if MEMORY_CAPACITY // 16 == 0:
     SAMPLE_NUM = 1
-    RAM_SCALE = 0.9
+    RAM_SCALE = 0.8
 else:
-    SAMPLE_NUM = MEMORY_CAPACITY // 16
+    SAMPLE_NUM = int(MEMORY_CAPACITY // 16)
     RAM_SCALE = 1.
 
 
@@ -73,15 +73,17 @@ def cvt_process(ori_img, color_dict):
 def req_weight(im):
     """
     获取颜色权重
-    :return: 将颜色值转换为权重值，默认最低权重值为0.001
+    :return: 将颜色值转换为权重值，默认最低权重值为0.0001
     """
     count = np.histogram(im, 256, range=(0, 256))[0].astype("float32")
+    min2 = np.sort(count[count > 0])[0]
     count[count == 0] = 1.
     count_t = np.reciprocal(count)
-    count_t = np.maximum(count_t, 0.001)
+    count_t *= min2
+    count_t = np.maximum(count_t, 0.000001)
     color_map = dict([(k, v) for k, v in zip(range(256), count_t)])
     im_w = cvt_color(im.astype("float32"), color_map)
-    im_w /= np.max(im_w)
+    # im_w /= np.max(im_w)
     return im_w
 
 
@@ -89,11 +91,16 @@ def make_train_data(sample):
     sample, is_test = sample
     tmp_cvt_l_label = []
     tmp_cvt_l = []
+    tmp_cvt_l2 = []
     tmp_cvt_a = []
     tmp_cvt_b = []
     tmp_w_a = []
     tmp_w_b = []
-    for index in range(SAMPLE_NUM):
+    if is_test:
+        sample_num = 1
+    else:
+        sample_num = SAMPLE_NUM
+    for index in range(sample_num):
         # 原始图像随机尺寸缩放
         if is_test:
             r_ori_scale = 0.9
@@ -101,6 +108,8 @@ def make_train_data(sample):
         else:
             r_ori_scale = random.uniform(0.25, 0.9)
             r_scale = random.uniform(0.5, 0.8)
+        sample_h, sample_w = sample.shape[:2]
+        sample = cv.resize(sample, (int(sample_w * RAM_SCALE), int(sample_h * RAM_SCALE)))
         sample_h, sample_w = sample.shape[:2]
         pre_done_img = cv.resize(sample, (
             int(sample_w * r_ori_scale), int(sample_h * r_ori_scale)))
@@ -111,23 +120,35 @@ def make_train_data(sample):
 
         # 压缩颜色空间
         cvt_l, cvt_a, cvt_b = cvt_process(pre_done_img, c_dict)
+        cvt_l2 = cv.resize(cvt_a, (256, 256), interpolation=cv.INTER_NEAREST)
+        cvt_a = cv.resize(cvt_a, (256, 256), interpolation=cv.INTER_NEAREST)
+        cvt_b = cv.resize(cvt_b, (256, 256), interpolation=cv.INTER_NEAREST)
 
         # 生成低分辨率图像
-        cvt_l_label = cv.resize(cvt_l, (
-            int(pre_done_img.shape[1] * r_scale), int(pre_done_img.shape[0] * r_scale)))
-        cvt_l_label = cv.resize(cvt_l_label, (pre_done_img.shape[1], pre_done_img.shape[0]))
+        cvt_l_label = cv.resize(cvt_l,
+                                (int(pre_done_img.shape[1] * r_scale), int(pre_done_img.shape[0] * r_scale)),
+                                interpolation=cv.INTER_NEAREST)
+        cvt_l_label = cv.resize(cvt_l_label,
+                                (pre_done_img.shape[1], pre_done_img.shape[0]),
+                                interpolation=cv.INTER_NEAREST)
 
         tmp_w_a_array = [req_weight(cvt_a)]
         tmp_w_b_array = [req_weight(cvt_b)]
         # 数据增强 - 翻转
         for mode in random.sample([-1, 0, 1, -2], 4):
-            if mode == -2:
+            if mode == -2 or is_test:
                 tmp_cvt_l_label.append([cvt_l_label])
                 tmp_cvt_l.append([cvt_l])
+                tmp_cvt_l2.append([cvt_l2])
                 tmp_cvt_a.append([cvt_a])
                 tmp_cvt_b.append([cvt_b])
+                if is_test:
+                    tmp_w_a.append(tmp_w_a_array)
+                    tmp_w_b.append(tmp_w_b_array)
+                    break
             else:
                 tmp_cvt_l_label.append([cv.flip(cvt_l_label, mode)])
+                tmp_cvt_l2.append([cv.flip(cvt_l2, mode)])
                 tmp_cvt_l.append([cv.flip(cvt_l, mode)])
                 tmp_cvt_a.append([cv.flip(cvt_a, mode)])
                 tmp_cvt_b.append([cv.flip(cvt_b, mode)])
@@ -136,15 +157,25 @@ def make_train_data(sample):
 
     cvt_l_label = np.array(tmp_cvt_l_label).astype("float32")
     cvt_l = np.array(tmp_cvt_l).astype("float32")
+    cvt_l2 = np.array(tmp_cvt_l2).astype("float32")
     cvt_a = np.array(tmp_cvt_a).astype("int64")
     cvt_b = np.array(tmp_cvt_b).astype("int64")
     w_a = np.array(tmp_w_a).astype("float32")
     w_b = np.array(tmp_w_b).astype("float32")
     pack = []
-    for index in range(SAMPLE_NUM * 4):
+    for index in range(int(SAMPLE_NUM * 4)):
         if index == MAX_BATCH_SIZE:
             break
-        pack.append((cvt_l_label[index] / 255, cvt_l[index] / 255, cvt_a[index], cvt_b[index], w_a[index], w_b[index]))
+        pack.append((
+            (cvt_l_label[index] - 128) / 128,
+            (cvt_l[index] - 128) / 128,
+            (cvt_l2[index] - 128) / 128,
+            cvt_a[index],
+            cvt_b[index],
+            w_a[index],
+            w_b[index]))
+        if is_test:
+            break
     return pack
 
 
@@ -159,7 +190,8 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False):
             if is_infer:
                 try:
                     ori_img = cv.imread(os.path.join(data_path, file_name))
-                    l_img = cv.cvtColor(ori_img, cv.COLOR_BGR2GRAY)
+                    l_img = cv.cvtColor(ori_img, cv.COLOR_BGR2LAB)
+                    l_img, _, _ = cv.split(l_img)
                     l_img = np.array([[l_img]]).astype("float32") / 255
                     yield l_img
                 except Exception:
@@ -175,10 +207,30 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False):
                 else:
                     yield ori_img, is_test
 
-    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, CPU_NUM * 2) if not is_infer else _reader
+    return fluid.io.xmap_readers(make_train_data, _reader, CPU_NUM, CPU_NUM * 4) if not is_infer else _reader
 
 
 if __name__ == '__main__':
-    tmp = reader("data/f")
+    tmp = reader("data/ff", is_test=True)
+    with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
+        a_dict_vdl, b_dict_vdl = eval(f.read())[1]
+
+
+    def vdl(l_vdl, a_vdl, b_vdl, name):
+        vdl_h, vdl_w = l_vdl.shape[:2]
+        a_vdl = cvt_color(a_vdl, a_dict_vdl)
+        b_vdl = cvt_color(b_vdl, b_dict_vdl)
+        tmp_img = cv.merge([l_vdl.astype("uint8"),
+                            cv.resize(a_vdl.astype("uint8"), (vdl_w, vdl_h), interpolation=cv.INTER_NEAREST),
+                            cv.resize(b_vdl.astype("uint8"), (vdl_w, vdl_h), interpolation=cv.INTER_NEAREST)])
+        tmp_img = cv.cvtColor(tmp_img, cv.COLOR_LAB2BGR)
+        cv.imshow(name, tmp_img)
+
+
     for i in tmp():
-        print(1)
+        if i:
+            i = i[0]
+            print("OK")
+            vdl(i[1][0] * 128 + 128, i[3][0], i[4][0], "ori")
+            vdl(i[0][0] * 128 + 128, i[3][0], i[4][0], "scale")
+            cv.waitKey(0)
