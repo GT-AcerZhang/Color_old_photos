@@ -14,8 +14,15 @@ def double_conv(data, out_ch):
         data = bn_relu(
             conv(data, out_ch, 3, stride=1, padding=1, param_attr=param_attr))
     with scope("conv1"):
-        data = bn_relu(
+        data_1 = bn_relu(
             conv(data, out_ch, 3, stride=1, padding=1, param_attr=param_attr))
+    with scope("conv2"):
+        data_2 = bn_relu(
+            conv(data, out_ch, 3, stride=1, padding="SAME", dilation=2, param_attr=param_attr))
+    with scope("conv3"):
+        data_3 = bn_relu(
+            conv(data, out_ch, 3, stride=1, padding="SAME", dilation=3, param_attr=param_attr))
+    data = fluid.layers.concat([data_1, data_2, data_3], axis=1)
     return data
 
 

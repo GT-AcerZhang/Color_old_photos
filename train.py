@@ -23,7 +23,7 @@ CHECK_POINT_DIR = os.path.join(ROOT_PATH, "check_point/check_model.color")
 PER_MODEL_DIR = os.path.join(ROOT_PATH, "data/unet_coco_v3")
 MODEL_DIR = os.path.join(ROOT_PATH, "best_model.color")
 
-EPOCH = 5
+EPOCH = 3
 BATCH_SIZE = 16
 MAX_ITER_NUM = 100000
 
@@ -76,11 +76,13 @@ with fluid.program_guard(train_program, start_program):
         label2c = fluid.layers.transpose(label2c, [0, 2, 1])
         label2acc = fluid.layers.flatten(label2c, axis=2)
         metric = fluid.layers.accuracy(signal2acc, label2acc)
+        metric_k3 = fluid.layers.accuracy(signal2acc, label2acc, 3)
 
         # 标签加权
         label2c = fluid.one_hot(label2c, CLASS_NUM[MODE])
         label2c = fluid.layers.squeeze(label2c, axes=[2])
         label2c = fluid.layers.elementwise_mul(label2c, ipt_w, axis=2)
+        label2c.stop_gradient = True
 
         # 计算损失
         cost = fluid.layers.cross_entropy(fluid.layers.softmax(signal2c), label2c, soft_label=True)
@@ -102,6 +104,8 @@ with fluid.program_guard(train_program, start_program):
                                                END_LR)
     # opt = fluid.optimizer.Adam(decayed_lr, grad_clip=fluid.clip.GradientClipByNorm(clip_norm=1.0))
     opt = fluid.optimizer.Adam(decayed_lr)
+    opt = fluid.optimizer.RecomputeOptimizer(opt)
+    opt._set_checkpoints([ipt_layer, signal])
     opt.minimize(loss)
 
 feeder_list = [ipt_layer, ipt_label]
@@ -134,7 +138,7 @@ def if_exist(var):
 if os.path.exists(PER_MODEL_DIR) and LOAD_PER_MODEL:
     fluid.io.load_vars(exe, PER_MODEL_DIR, train_program, predicate=if_exist)
 
-BEST_METRIC = 0.
+BEST_METRIC = 1.
 ITER_NUM = 0
 for epoch in range(EPOCH):
     out_loss = list()
@@ -157,12 +161,12 @@ for epoch in range(EPOCH):
         lr = out[2]
         cost_time = time.time() - start_time
 
-        if data_id % 20 == 0:
+        if data_id % 50 == 0:
             print(epoch,
                   "-",
                   data_id,
                   "TRAIN:\t{:.6f}".format(sum(out_loss) / len(out_loss)),
-                  "\tMETRIC([L]PSNR|[AB]ACC):{:.6f}".format(
+                  "\tMETRIC([L]PSNR | [AB]ACC):{:.6f}".format(
                       10 * np.log10(255 * 255 / sum(out_metric) / len(out_metric)) if MODE == "L"
                       else np.average(out_metric)),
                   "\tTIME:\t{:.4f}/s".format(cost_time / len(data)),
@@ -176,18 +180,24 @@ for epoch in range(EPOCH):
         if data_id % 100 == 100 - 1:
             out_loss = list()
             out_metric = list()
+            out_metric_k3 = list()
             print("Run test...")
             for t_data_id, data_t in enumerate(test_loader()):
                 if t_data_id == 160 // BATCH_SIZE:
                     break
+                fetch_list = [loss, metric] if MODE == "L" else [loss, metric, metric_k3]
                 out = exe.run(program=compiled_test_prog,
                               feed=data_t,
-                              fetch_list=[loss, metric])
+                              fetch_list=fetch_list)
                 out_loss.append(out[0][0])
                 out_metric.append(out[1][0])
+                if MODE != "L":
+                    out_metric_k3.append(out[2][0])
             avg_metric = np.average(out_metric)
-            if (avg_metric <= BEST_METRIC and MODE == "L") or (avg_metric >= BEST_METRIC and MODE != "L"):
-                BEST_METRIC = avg_metric
+            avg_metric_k3 = np.average(out_metric_k3) if MODE != "L" else 0
+            avg_loss = np.average(out_loss)
+            if avg_loss <= BEST_METRIC:
+                BEST_METRIC = avg_loss
                 print("\033[0;37;41m[WARNING]\tSaving best checkpoint... Please don't stop running! \033[0m")
                 fluid.io.save(train_program, CHECK_POINT_DIR + ".best")
                 print("\033[0;37;42m[INFO]\tDone\033[0m")
@@ -199,3 +209,5 @@ for epoch in range(EPOCH):
                       10 * np.log10(255 * 255 / sum(out_metric) / len(out_metric)) if MODE == "L"
                       else avg_metric),
                   "\tBEST METRIC", BEST_METRIC)
+            if MODE != "L":
+                print("ACC Top-K", avg_metric_k3)
