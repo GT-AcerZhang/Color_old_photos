@@ -116,10 +116,13 @@ test_feeder = fluid.DataFeeder(place=place,
                                feed_list=feeder_list,
                                program=test_program)
 
-train_loader = train_feeder.decorate_reader(fluid.io.batch(reader(TRAIN_DATA_PATH, freeze_pix=MODE), BATCH_SIZE),
+train_loader = train_feeder.decorate_reader(fluid.io.batch(reader(TRAIN_DATA_PATH, freeze_pix=MODE),
+                                                           BATCH_SIZE,
+                                                           drop_last=True),
                                             multi_devices=True)
 test_loader = test_feeder.decorate_reader(fluid.io.batch(reader(TEST_DATA_PATH, is_test=True, freeze_pix=MODE),
-                                                         BATCH_SIZE),
+                                                         BATCH_SIZE,
+                                                         drop_last=True),
                                           multi_devices=True)
 
 exe.run(start_program)
