@@ -8,34 +8,34 @@ import time
 import numpy as np
 import paddle.fluid as fluid
 
-from models.libs.model_libs import scope
-from models.modeling.l_net import l_net
+from l_net import l_net, set_name
 from data_reader import reader, get_weight, get_class_num, get_resize
 
 MODE = "A"
 LOAD_CHECKPOINT = False
 LOAD_PER_MODEL = False
+DEBUG = False
 
 ROOT_PATH = "./"
 TRAIN_DATA_PATH = os.path.join(ROOT_PATH, "data/train")
 TEST_DATA_PATH = os.path.join(ROOT_PATH, "data/test")
 CHECK_POINT_DIR = os.path.join(ROOT_PATH, "check_point/check_model.color")
 PER_MODEL_DIR = os.path.join(ROOT_PATH, "data/unet_coco_v3")
-MODEL_DIR = os.path.join(ROOT_PATH, "best_model.color")
 
-EPOCH = 3
-BATCH_SIZE = 16
+EPOCH = 3 if not DEBUG else 1000
+BATCH_SIZE = 8 if not DEBUG else 1
 MAX_ITER_NUM = 100000
 
-BOUNDARIES = [500, 1000, 5000, 10000]
-VALUES = [0.001, 0.00005, 0.00001, 0.000005, 0.000001]
-WARM_UP_STEPS = 50
+BOUNDARIES = [200, 500, 1000, 10000]
+VALUES = [0.001, 0.00001, 0.000001, 0.0000005, 0.0000001]
+WARM_UP_STEPS = 20
 START_LR = 0.005
 END_LR = 0.01
 
 RESIZE = get_resize()
 signal_a_num, signal_b_num = get_class_num()
 CLASS_NUM = {"L": 1, "A": signal_a_num, "B": signal_b_num}
+set_name(MODE)
 
 place = fluid.CUDAPlace(0)
 places = fluid.cuda_places()
@@ -54,14 +54,14 @@ with fluid.program_guard(train_program, start_program):
         ipt_label = fluid.data(name="ipt_label_" + MODE, shape=[-1, 1, -1, -1], dtype="int64")
         w_a, w_b = get_weight()
         ipt_w = fluid.layers.assign(w_a if MODE == "A" else w_b)
+        # ipt_w = fluid.layers.softmax(ipt_w)
 
     # 获得shape参数
     im_shape = fluid.layers.shape(ipt_label)
     im_shape = fluid.layers.slice(im_shape, axes=[0], starts=[2], ends=[4])
 
     # 组网
-    with scope("signal_" + MODE):
-        signal = l_net(ipt_layer, im_shape, CLASS_NUM[MODE])
+    signal = l_net(ipt_layer, im_shape, CLASS_NUM[MODE])
 
     if MODE == "L":
         # 统计指标
@@ -82,6 +82,7 @@ with fluid.program_guard(train_program, start_program):
         label2c = fluid.one_hot(label2c, CLASS_NUM[MODE])
         label2c = fluid.layers.squeeze(label2c, axes=[2])
         label2c = fluid.layers.elementwise_mul(label2c, ipt_w, axis=2)
+
         label2c.stop_gradient = True
 
         # 计算损失
@@ -89,12 +90,6 @@ with fluid.program_guard(train_program, start_program):
         loss = fluid.layers.mean(cost)
 
     test_program = train_program.clone(for_test=True)
-    # signal_a = fluid.layers.resize_nearest(signal_a, im_shape)
-    # signal_b = fluid.layers.resize_nearest(signal_b, im_shape)
-    # signal_a_out = fluid.layers.transpose(signal_a, [0, 2, 3, 1])
-    # signal_b_out = fluid.layers.transpose(signal_b, [0, 2, 3, 1])
-    # signal_a_out = fluid.layers.argmax(x=signal_a_out, axis=-1)
-    # signal_b_out = fluid.layers.argmax(x=signal_b_out, axis=-1)
 
     # 学习率调度器
     learning_rate = fluid.layers.piecewise_decay(boundaries=BOUNDARIES, values=VALUES)
@@ -102,8 +97,8 @@ with fluid.program_guard(train_program, start_program):
                                                WARM_UP_STEPS,
                                                START_LR,
                                                END_LR)
-    # opt = fluid.optimizer.Adam(decayed_lr, grad_clip=fluid.clip.GradientClipByNorm(clip_norm=1.0))
-    opt = fluid.optimizer.Adam(decayed_lr)
+    opt = fluid.optimizer.Adam(decayed_lr,
+                               regularization=fluid.regularizer.L2Decay(0.1))
     opt = fluid.optimizer.RecomputeOptimizer(opt)
     opt._set_checkpoints([ipt_layer, signal])
     opt.minimize(loss)
@@ -116,22 +111,28 @@ test_feeder = fluid.DataFeeder(place=place,
                                feed_list=feeder_list,
                                program=test_program)
 
-train_loader = train_feeder.decorate_reader(fluid.io.batch(reader(TRAIN_DATA_PATH, freeze_pix=MODE),
-                                                           BATCH_SIZE,
-                                                           drop_last=True),
-                                            multi_devices=True)
-test_loader = test_feeder.decorate_reader(fluid.io.batch(reader(TEST_DATA_PATH, is_test=True, freeze_pix=MODE),
-                                                         BATCH_SIZE,
-                                                         drop_last=True),
-                                          multi_devices=True)
+if MODE == "L":
+    train_loader = train_feeder.decorate_reader(reader(TRAIN_DATA_PATH, freeze_pix=MODE),
+                                                multi_devices=True)
+    test_loader = test_feeder.decorate_reader(reader(TEST_DATA_PATH, is_test=True, freeze_pix=MODE),
+                                              multi_devices=True)
+else:
+    train_loader = train_feeder.decorate_reader(fluid.io.batch(reader(TRAIN_DATA_PATH, freeze_pix=MODE),
+                                                               BATCH_SIZE,
+                                                               drop_last=True),
+                                                multi_devices=True)
+    test_loader = test_feeder.decorate_reader(fluid.io.batch(reader(TEST_DATA_PATH, is_test=True, freeze_pix=MODE),
+                                                             BATCH_SIZE,
+                                                             drop_last=True),
+                                              multi_devices=True)
 
 exe.run(start_program)
 
 compiled_train_prog = fluid.CompiledProgram(train_program).with_data_parallel(loss_name=loss.name)
 compiled_test_prog = fluid.CompiledProgram(test_program).with_data_parallel(share_vars_from=compiled_train_prog)
 print("Net check --OK")
-if os.path.exists(CHECK_POINT_DIR + ".pdopt") and LOAD_CHECKPOINT:
-    fluid.io.load(train_program, CHECK_POINT_DIR, exe)
+if os.path.exists(CHECK_POINT_DIR) and LOAD_CHECKPOINT:
+    fluid.io.load_persistables(exe, CHECK_POINT_DIR, train_program)
 
 
 def if_exist(var):
@@ -141,7 +142,7 @@ def if_exist(var):
 if os.path.exists(PER_MODEL_DIR) and LOAD_PER_MODEL:
     fluid.io.load_vars(exe, PER_MODEL_DIR, train_program, predicate=if_exist)
 
-BEST_METRIC = 1.
+BEST_METRIC = 5.
 ITER_NUM = 0
 for epoch in range(EPOCH):
     out_loss = list()
@@ -163,6 +164,19 @@ for epoch in range(EPOCH):
         out_metric.append(out[1][0])
         lr = out[2]
         cost_time = time.time() - start_time
+        if DEBUG:
+            print(epoch,
+                  "-",
+                  data_id,
+                  "TRAIN:\t{:.6f}".format(sum(out_loss) / len(out_loss)),
+                  "\tMETRIC([L]PSNR | [AB]ACC):{:.6f}".format(
+                      10 * np.log10(255 * 255 / (sum(out_metric) / len(out_metric))) if MODE == "L"
+                      else np.average(out_metric)),
+                  "\tTIME:\t{:.4f}/s".format(cost_time / len(data)),
+                  "\tLR:", lr)
+            if epoch % 50 == 50 - 1:
+                fluid.io.save_persistables(exe, "DEBUG_" + CHECK_POINT_DIR, train_program)
+            break
 
         if data_id % 50 == 0:
             print(epoch,
@@ -170,17 +184,17 @@ for epoch in range(EPOCH):
                   data_id,
                   "TRAIN:\t{:.6f}".format(sum(out_loss) / len(out_loss)),
                   "\tMETRIC([L]PSNR | [AB]ACC):{:.6f}".format(
-                      10 * np.log10(255 * 255 / sum(out_metric) / len(out_metric)) if MODE == "L"
+                      10 * np.log10(255 * 255 / (sum(out_metric) / len(out_metric))) if MODE == "L"
                       else np.average(out_metric)),
                   "\tTIME:\t{:.4f}/s".format(cost_time / len(data)),
                   "\tLR:", lr)
             out_loss = []
             out_loss_l = []
             print("\033[0;37;41m[WARNING]\tSaving checkpoint... Please don't stop running! \033[0m")
-            fluid.io.save(train_program, CHECK_POINT_DIR)
+            fluid.io.save_persistables(exe, CHECK_POINT_DIR, train_program)
             print("\033[0;37;42m[INFO]\tDone\033[0m")
 
-        if data_id % 100 == 100 - 1:
+        if data_id % 300 == 300 - 1:
             out_loss = list()
             out_metric = list()
             out_metric_k3 = list()
@@ -202,14 +216,14 @@ for epoch in range(EPOCH):
             if avg_loss <= BEST_METRIC:
                 BEST_METRIC = avg_loss
                 print("\033[0;37;41m[WARNING]\tSaving best checkpoint... Please don't stop running! \033[0m")
-                fluid.io.save(train_program, CHECK_POINT_DIR + ".best")
+                fluid.io.save_persistables(exe, CHECK_POINT_DIR + ".best", train_program)
                 print("\033[0;37;42m[INFO]\tDone\033[0m")
             print(epoch,
                   "-",
                   data_id,
                   "TEST:\t{:.6f}".format(sum(out_loss) / len(out_loss)),
                   "\tMETRIC([L]PSNR | [AB]ACC):{:.6f}".format(
-                      10 * np.log10(255 * 255 / sum(out_metric) / len(out_metric)) if MODE == "L"
+                      10 * np.log10(255 * 255 / (sum(out_metric) / len(out_metric))) if MODE == "L"
                       else avg_metric),
                   "\tBEST METRIC", BEST_METRIC)
             if MODE != "L":

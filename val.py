@@ -10,8 +10,8 @@ from data_reader import reader
 from data_reader import cvt_color
 
 TEST_DATA_PATH = "./data/ff"
-MODEL_DIR = "./best_model.color"
-DICT_PATH = "./color_files/Color1D_Base_V2.dict"
+MODEL_DIR = "./color.model"
+DICT_PATH = "./color_files/Color1D_Beta2.dict"
 
 with open(DICT_PATH, "r", encoding="utf-8") as f:
     a_dict, b_dict = eval(f.read())["2ori"]
@@ -34,8 +34,9 @@ program, feed_list, target_list = fluid.io.load_inference_model(dirname=MODEL_DI
 
 for data in reader():
     ori_l = data[0]
-    out = exe.run(program, feed={feed_list[0]: data, feed_list[1]: data}, fetch_list=target_list)
+    ori_r = data[1]
+    out = exe.run(program, feed={feed_list[0]: ori_l, feed_list[1]: ori_r}, fetch_list=target_list)
     signal_l, signal_a_out, signal_b_out = out
     visual_img(signal_l[0][0] * 128 + 128, signal_a_out[0], signal_b_out[0], "all")
-    visual_img(ori_l[0] * 128 + 128, signal_a_out[0], signal_b_out[0], "ori_l")
+    visual_img(ori_l[0][0] * 128 + 128, signal_a_out[0], signal_b_out[0], "ori_l")
     cv.waitKey(0)

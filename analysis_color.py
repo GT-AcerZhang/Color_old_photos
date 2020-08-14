@@ -7,13 +7,13 @@ import os
 import numpy as np
 import cv2 as cv
 
-BLOCK_SIZE1D = 25  # 1D细分类块大小，越大分类数越高，效果越好 - 模型大小会增加
-MAX_STEP = 15  # 最大步长，越低效果越好
-MIN_STEP = 10  # 最低步长
+BLOCK_SIZE1D = 84  # 1D细分类块大小，越大分类数越高，效果越好 - 模型大小会增加
+MAX_STEP = 5  # 最大步长，越低效果越好
+MIN_STEP = 3  # 最低步长
 IMG_BLOCK = 10000  # 图片采样数，越高越好 - 统计速度变慢
 R_IMG_SIZE = (256, 256)  # 采样分辨率，越高越好 - 可能出现爆炸现象 - 性价比较低
-IMAGE_DIR_PATH = "./val2017"
-FILE_NAME = "color_files/Color1D_Best2"
+IMAGE_DIR_PATH = "./test2017"
+FILE_NAME = "color_files/Color1D_Beta2"
 
 
 def analysis1d(signal, step):
@@ -30,13 +30,13 @@ def analysis1d(signal, step):
     color_dict = dict()
     w_list = list()
     while True:
-        if (label == BLOCK_SIZE1D - 2 and end - start <= MAX_STEP) or start + MAX_STEP >= 255:
+        if end >= 255 - MAX_STEP:
             block_dict.update(dict([(k, label) for k in range(start, 256)]))
             color_dict[label] = start + int((np.max(signal[start:256]).astype("uint8") + (end - start)) * 0.5)
             w = np.sum(signal[start:256])
             w_list.append(w)
             break
-        if np.sum(signal[start:end]) >= int(step) or end - start >= MAX_STEP:
+        elif np.sum(signal[start:end]) >= int(step) and end - start >= MAX_STEP:
             block_dict.update(dict([(k, label) for k in range(start, end)]))
             color_dict[label] = start + int((np.argmax(signal[start:end]).astype("uint8") + (end - start)) * 0.5)
             start = end
@@ -46,14 +46,11 @@ def analysis1d(signal, step):
             w_list.append(w)
         else:
             end += 1
-    w_list = np.array(w_list)
-    w_list[w_list == 0] = 1.
-    acc = np.max(w_list) / np.sum(w_list)
-    w_list_t = np.reciprocal(w_list)
-    w_max = np.sort(w_list_t[w_list_t < 1.])[-1]
-    w_list_t /= w_max
-    w_list_t = np.round(np.minimum(w_list_t, 5.0), 7).tolist()
-    return block_dict, color_dict, label + 1, w_list_t, acc
+    w_list = np.array(w_list).astype("float32")
+    w_sum = np.sum(w_list)
+    acc = np.max(w_list) / w_sum
+    w_list_t = 1 - (w_list / float(w_sum))
+    return block_dict, color_dict, label + 1, w_list_t.tolist(), acc
 
 
 print("开始统计颜色信号...")

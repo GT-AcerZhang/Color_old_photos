@@ -8,9 +8,9 @@ import cv2 as cv
 
 DEBUG = False
 CPU_NUM = 4  # CPU 队列数 不推荐过高
-MAX_BATCH_SIZE = 4  # BATCH SIZE 阈值，16G显存推荐为2
+MAX_BATCH_SIZE = 1  # BATCH SIZE 阈值，16G显存推荐为2
 MEMORY_CAPACITY = 16.0  # 硬件会保留部分显存，此处为可用内存大小，单位GB
-DICT_FILE_PATH = "./color_files/Color1D_Base_V2.dict"  # 颜色空间文件
+DICT_FILE_PATH = "./color_files/Color1D_Beta.dict"  # 颜色空间文件
 RESIZE = 256
 
 # 读取颜色空间字典
@@ -98,9 +98,6 @@ def make_train_data(sample):
     sample, is_test, freeze_pix = sample
     tmp_cvt_l_label = []
     tmp_cvt_l = []
-    tmp_cvt_l2 = []
-    tmp_cvt_a = []
-    tmp_cvt_b = []
     if is_test:
         sample_num = 1
     else:
@@ -148,33 +145,21 @@ def make_train_data(sample):
             if mode == -2 or is_test:
                 tmp_cvt_l_label.append([cvt_l_label])
                 tmp_cvt_l.append([cvt_l])
-                tmp_cvt_l2.append([cvt_l2])
-                tmp_cvt_a.append([cvt_a])
-                tmp_cvt_b.append([cvt_b])
                 if is_test:
                     break
             else:
                 tmp_cvt_l_label.append([cv.flip(cvt_l_label, mode)])
-                tmp_cvt_l2.append([cv.flip(cvt_l2, mode)])
                 tmp_cvt_l.append([cv.flip(cvt_l, mode)])
-                tmp_cvt_a.append([cv.flip(cvt_a, mode)])
-                tmp_cvt_b.append([cv.flip(cvt_b, mode)])
 
     cvt_l_label = np.array(tmp_cvt_l_label).astype("float32")
     cvt_l = np.array(tmp_cvt_l).astype("float32")
-    cvt_l2 = np.array(tmp_cvt_l2).astype("float32")
-    cvt_a = np.array(tmp_cvt_a).astype("int64")
-    cvt_b = np.array(tmp_cvt_b).astype("int64")
     pack = []
 
     for index in range(int(SAMPLE_NUM * 4)):
         if index == MAX_BATCH_SIZE:
             break
         pack_t = ((cvt_l_label[index] - 128) / 128,
-                  (cvt_l[index] - 128) / 128,
-                  (cvt_l2[index] - 128) / 128,
-                  cvt_a[index],
-                  cvt_b[index])
+                  (cvt_l[index] - 128) / 128)
         pack.append(pack_t)
         if is_test:
             break
@@ -194,8 +179,10 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False, freeze_pix=
                     ori_img = cv.imread(os.path.join(data_path, file_name))
                     l_img = cv.cvtColor(ori_img, cv.COLOR_BGR2LAB)
                     l_img, _, _ = cv.split(l_img)
+                    r_img = cv.resize(l_img, (RESIZE, RESIZE))
                     l_img = np.array([[l_img]]).astype("float32") / 255
-                    yield l_img
+                    r_img = np.array([[r_img]]).astype("float32") / 255
+                    yield l_img, r_img
                 except Exception:
                     print(file_name, "Image reading failed!")
                     traceback.print_exc()
@@ -225,7 +212,7 @@ def get_class_num():
 
 
 if __name__ == '__main__':
-    tmp = reader("data/f", is_test=True, freeze_pix="A")
+    tmp = reader("data/ff", is_infer=True, freeze_pix="L")
     with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
         a_dict_vdl, b_dict_vdl = eval(f.read())["2ori"]
 
