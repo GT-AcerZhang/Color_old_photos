@@ -2,25 +2,26 @@
 # Datetime:2020/7/6 21:39
 # Copyright belongs to the author.
 # Please indicate the source for reprinting.
+import numpy as np
 import cv2 as cv
 import paddle.fluid as fluid
 from matplotlib import pyplot as plt
 
 from data_reader import reader
-from data_reader import cvt_color
+from color2d import cvt2color
 
-TEST_DATA_PATH = "./data/ff"
+TEST_DATA_PATH = "./data/fff"
 MODEL_DIR = "./color.model"
-DICT_PATH = "./color_files/Color1D_Beta2.dict"
+DICT_PATH = "./color_files/Color_2D.dict"
 
 with open(DICT_PATH, "r", encoding="utf-8") as f:
-    a_dict, b_dict = eval(f.read())["2ori"]
+    color_map = eval(f.read())["2color"]
 
 
-def visual_img(l, a, b, name):
-    a = cvt_color(a, a_dict)
-    b = cvt_color(b, b_dict)
-    tmp_img = cv.merge([l.astype("uint8"), a.astype("uint8"), b.astype("uint8")])
+def vdl(l_vdl, ab_vdl, name):
+    ab_vdl = cvt2color(ab_vdl, color_map)
+    l_vdl = np.expand_dims(l_vdl, axis=2).astype("uint8")
+    tmp_img = np.concatenate([l_vdl, ab_vdl], axis=2)
     tmp_img = cv.cvtColor(tmp_img, cv.COLOR_LAB2BGR)
     cv.imshow(name, tmp_img)
 
@@ -36,7 +37,7 @@ for data in reader():
     ori_l = data[0]
     ori_r = data[1]
     out = exe.run(program, feed={feed_list[0]: ori_l, feed_list[1]: ori_r}, fetch_list=target_list)
-    signal_l, signal_a_out, signal_b_out = out
-    visual_img(signal_l[0][0] * 128 + 128, signal_a_out[0], signal_b_out[0], "all")
-    visual_img(ori_l[0][0] * 128 + 128, signal_a_out[0], signal_b_out[0], "ori_l")
+    signal_l, signal_ab = out
+    vdl(signal_l[0][0] * 128 + 128, signal_ab[0], "all")
+    vdl(ori_l[0][0] * 128 + 128, signal_ab[0], "ori_l")
     cv.waitKey(0)

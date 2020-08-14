@@ -11,7 +11,7 @@ import paddle.fluid as fluid
 from l_net import l_net, set_name
 from data_reader import reader, get_weight, get_class_num, get_resize
 
-MODE = "A"
+MODE = "AB"
 LOAD_CHECKPOINT = False
 LOAD_PER_MODEL = False
 DEBUG = False
@@ -33,12 +33,12 @@ START_LR = 0.005
 END_LR = 0.01
 
 RESIZE = get_resize()
-signal_a_num, signal_b_num = get_class_num()
-CLASS_NUM = {"L": 1, "A": signal_a_num, "B": signal_b_num}
+signal_ab_num = get_class_num()
+CLASS_NUM = {"L": 1, "AB": signal_ab_num}
 set_name(MODE)
 
 place = fluid.CUDAPlace(0)
-places = fluid.cuda_places()
+# place = fluid.CPUPlace()
 exe = fluid.Executor(place)
 
 train_program = fluid.Program()
@@ -52,8 +52,9 @@ with fluid.program_guard(train_program, start_program):
     else:
         ipt_layer = fluid.data(name="ipt_layer_" + MODE, shape=[-1, 1, -1, -1])
         ipt_label = fluid.data(name="ipt_label_" + MODE, shape=[-1, 1, -1, -1], dtype="int64")
-        w_a, w_b = get_weight()
-        ipt_w = fluid.layers.assign(w_a if MODE == "A" else w_b)
+        w_ab = get_weight()
+        ipt_w = fluid.layers.assign(w_ab)
+        fluid.layers.Print(ipt_w)
         # ipt_w = fluid.layers.softmax(ipt_w)
 
     # 获得shape参数
@@ -67,7 +68,7 @@ with fluid.program_guard(train_program, start_program):
         # 统计指标
         loss = fluid.layers.mse_loss(signal, ipt_label)
         metric = loss
-    else:
+    elif MODE == "AB":
         signal2c = fluid.layers.reshape(signal, shape=[-1, CLASS_NUM[MODE], RESIZE * RESIZE])
         signal2c = fluid.layers.transpose(signal2c, [0, 2, 1])
         signal2acc = fluid.layers.flatten(signal2c, axis=2)
@@ -97,8 +98,10 @@ with fluid.program_guard(train_program, start_program):
                                                WARM_UP_STEPS,
                                                START_LR,
                                                END_LR)
+    clip = fluid.clip.GradientClipByGlobalNorm(clip_norm=1.0)
     opt = fluid.optimizer.Adam(decayed_lr,
-                               regularization=fluid.regularizer.L2Decay(0.1))
+                               regularization=fluid.regularizer.L2Decay(0.005),
+                               grad_clip=clip)
     opt = fluid.optimizer.RecomputeOptimizer(opt)
     opt._set_checkpoints([ipt_layer, signal])
     opt.minimize(loss)
@@ -177,7 +180,9 @@ for epoch in range(EPOCH):
             if epoch % 50 == 50 - 1:
                 fluid.io.save_persistables(exe, "DEBUG_" + CHECK_POINT_DIR, train_program)
             break
-
+        # if data_id == epoch:
+        #     print(data_id, "break")
+        #     break
         if data_id % 50 == 0:
             print(epoch,
                   "-",

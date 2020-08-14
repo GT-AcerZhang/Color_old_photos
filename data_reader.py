@@ -6,18 +6,20 @@ import paddle.fluid as fluid
 import numpy as np
 import cv2 as cv
 
+from color2d import cvt2label, cvt2color
+
 DEBUG = False
 CPU_NUM = 4  # CPU 队列数 不推荐过高
 MAX_BATCH_SIZE = 1  # BATCH SIZE 阈值，16G显存推荐为2
 MEMORY_CAPACITY = 16.0  # 硬件会保留部分显存，此处为可用内存大小，单位GB
-DICT_FILE_PATH = "./color_files/Color1D_Beta.dict"  # 颜色空间文件
+DICT_FILE_PATH = "./color_files/Color_2D.dict"  # 颜色空间文件
 RESIZE = 256
 
 # 读取颜色空间字典
 with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
     dict_info = eval(f.read())
-    c_dict = dict_info["2mini"]
-    w_dict = dict_info["weight"]
+    label_map = dict_info["2label"]
+    weight = dict_info["weight"]
 
 # 判断Mini Batch数据大小以及图片缩放系数
 if MEMORY_CAPACITY // 16 == 0:
@@ -48,52 +50,6 @@ def check_gray(ipt):
         return True
 
 
-def cvt_color(ori_img, color_dict: dict):
-    """
-    颜色转换
-    :param ori_img: 待转换图像矩阵
-    :param color_dict: 颜色字典
-    :return: 转换后图像
-    """
-    ori_img = ori_img.copy()
-    h, w = ori_img.shape
-    for pix_h in range(h):
-        for pix_w in range(w):
-            ori_img[pix_h][pix_w] = color_dict[int(ori_img[pix_h][pix_w])]
-    return ori_img
-
-
-def cvt_process(ori_img, color_dict):
-    """
-    图片颜色空间压缩
-    :param ori_img: 待压缩图像矩阵
-    :param color_dict: 颜色字典
-    :return: L通道 压缩后A和B通道
-    """
-    a_dict, b_dict = color_dict
-    l, a, b = cv.split(ori_img)
-    label_a = cvt_color(a, a_dict)
-    label_b = cvt_color(b, b_dict)
-    return l, label_a, label_b
-
-
-def req_weight(im):
-    """
-    获取颜色权重
-    :return: 将颜色值转换为权重值，默认最低权重值为0.0001
-    """
-    count = np.histogram(im, 256, range=(0, 256))[0].astype("float32")
-    min2 = np.sort(count[count > 0])[0]
-    count[count == 0] = 1.
-    count_t = np.reciprocal(count)
-    count_t *= min2
-    count_t = np.maximum(count_t, 0.000001)
-    color_map = dict([(k, v) for k, v in zip(range(256), count_t)])
-    im_w = cvt_color(im.astype("float32"), color_map)
-    # im_w /= np.max(im_w)
-    return im_w
-
-
 def make_train_data(sample):
     sample, is_test, freeze_pix = sample
     tmp_cvt_l_label = []
@@ -121,12 +77,11 @@ def make_train_data(sample):
         pre_done_img = cv.cvtColor(pre_done_img, cv.COLOR_BGR2LAB)
 
         # 压缩颜色空间
-        cvt_l, cvt_a, cvt_b = cvt_process(pre_done_img, c_dict)
-        cvt_l2 = cv.resize(cvt_l, (RESIZE, RESIZE), interpolation=cv.INTER_NEAREST)
-        cvt_a = cv.resize(cvt_a, (RESIZE, RESIZE), interpolation=cv.INTER_NEAREST)
-        cvt_b = cv.resize(cvt_b, (RESIZE, RESIZE), interpolation=cv.INTER_NEAREST)
+        cvt_l, cvt_ab = pre_done_img[:, :, 0], cvt2label(pre_done_img[:, :, 1:], label_map)
+        cvt_l_fix_shape = cv.resize(cvt_l, (RESIZE, RESIZE), interpolation=cv.INTER_NEAREST)
+        cvt_ab = cv.resize(cvt_ab, (RESIZE, RESIZE), interpolation=cv.INTER_NEAREST)
 
-        # 生成低分辨率图像
+        # 生成模糊图像
         cvt_l_label = cv.resize(cvt_l,
                                 (int(pre_done_img.shape[1] * r_scale), int(pre_done_img.shape[0] * r_scale)),
                                 interpolation=cv.INTER_NEAREST)
@@ -136,12 +91,10 @@ def make_train_data(sample):
 
         # 数据增强 - 翻转
         for mode in random.sample([-1, 0, 1, -2], 4):
-            if freeze_pix == "A":
-                return (np.array([cvt_l2]).astype("float32") - 128) / 128, \
-                       np.array([cvt_a]).astype("int64")
-            elif freeze_pix == "B":
-                return (np.array([cvt_l2]).astype("float32") - 128) / 128, \
-                       np.array([cvt_b]).astype("int64")
+            if freeze_pix == "AB":
+                return (np.array([cvt_l_fix_shape]).astype("float32") - 128) / 128, \
+                       np.array([cvt_ab]).astype("int64")
+
             if mode == -2 or is_test:
                 tmp_cvt_l_label.append([cvt_l_label])
                 tmp_cvt_l.append([cvt_l])
@@ -183,8 +136,8 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False, freeze_pix=
                     l_img = np.array([[l_img]]).astype("float32") / 255
                     r_img = np.array([[r_img]]).astype("float32") / 255
                     yield l_img, r_img
-                except Exception:
-                    print(file_name, "Image reading failed!")
+                except Exception as e:
+                    print(file_name, "Image reading failed!", e)
                     traceback.print_exc()
             else:
                 ori_img = cv.imread(os.path.join(data_path, file_name))
@@ -200,30 +153,24 @@ def reader(data_path, is_test: bool = False, is_infer: bool = False, freeze_pix=
 
 
 def get_weight():
-    a_w, b_w = w_dict
-    a_w = np.array(a_w).astype("float32")
-    b_w = np.array(b_w).astype("float32")
-    return a_w, b_w
+    w = np.array(weight).astype("float32")
+    return w
 
 
 def get_class_num():
-    a_w, b_w = w_dict
-    return len(a_w), len(b_w)
+    return len(weight)
 
 
 if __name__ == '__main__':
-    tmp = reader("data/ff", is_infer=True, freeze_pix="L")
+    tmp = reader("data/ff", freeze_pix="AB")
     with open(DICT_FILE_PATH, "r", encoding="utf-8") as f:
-        a_dict_vdl, b_dict_vdl = eval(f.read())["2ori"]
+        color_map = eval(f.read())["2color"]
 
 
-    def vdl(l_vdl, a_vdl, b_vdl, name):
-        vdl_h, vdl_w = l_vdl.shape[:2]
-        a_vdl = cvt_color(a_vdl, a_dict_vdl)
-        b_vdl = cvt_color(b_vdl, b_dict_vdl)
-        tmp_img = cv.merge([l_vdl.astype("uint8"),
-                            cv.resize(a_vdl.astype("uint8"), (vdl_w, vdl_h), interpolation=cv.INTER_NEAREST),
-                            cv.resize(b_vdl.astype("uint8"), (vdl_w, vdl_h), interpolation=cv.INTER_NEAREST)])
+    def vdl(l_vdl, ab_vdl, name):
+        ab_vdl = cvt2color(ab_vdl, color_map)
+        l_vdl = np.expand_dims(l_vdl, axis=2).astype("uint8")
+        tmp_img = np.concatenate([l_vdl, ab_vdl], axis=2)
         tmp_img = cv.cvtColor(tmp_img, cv.COLOR_LAB2BGR)
         cv.imshow(name, tmp_img)
 
@@ -234,8 +181,6 @@ if __name__ == '__main__':
     print("Weight", tmp_w)
     for i in tmp():
         if i:
-            i = i[0]
             print("OK")
-            vdl(i[1][0] * 128 + 128, i[3][0], i[4][0], "ori")
-            vdl(i[0][0] * 128 + 128, i[3][0], i[4][0], "scale")
+            vdl(i[0][0] * 128 + 128, i[1][0], "scale")
             cv.waitKey(0)

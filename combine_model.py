@@ -15,8 +15,8 @@ CHECK_POINTS_DIR = os.path.join(ROOT_PATH, "check_model.color")
 SAVE_DIR = os.path.join(ROOT_PATH, "color.model")
 
 RESIZE = get_resize()
-signal_a_num, signal_b_num = get_class_num()
-CLASS_NUM = {"L": 1, "A": signal_a_num, "B": signal_b_num}
+signal_ab_num = get_class_num()
+CLASS_NUM = {"L": 1, "AB": signal_ab_num}
 
 place = fluid.CPUPlace()
 exe = fluid.Executor(place)
@@ -38,18 +38,13 @@ with fluid.program_guard(train_program, start_program):
 
     set_name("L")
     signal_L = l_net(ipt_layer_L, im_shape_L, 1)
-    set_name("A")
-    signal_A = l_net(ipt_layer_AB, im_shape_AB, CLASS_NUM["A"])
-    set_name("B")
-    signal_B = l_net(ipt_layer_AB, im_shape_AB, CLASS_NUM["B"])
+    set_name("AB")
+    signal_AB = l_net(ipt_layer_AB, im_shape_AB, CLASS_NUM["AB"])
 
     # 获取AB结果
-    signal_A = fluid.layers.resize_nearest(signal_A, im_shape_L)
-    signal_B = fluid.layers.resize_nearest(signal_B, im_shape_L)
-    result_A = fluid.layers.transpose(signal_A, [0, 2, 3, 1])
-    result_B = fluid.layers.transpose(signal_B, [0, 2, 3, 1])
-    result_A = fluid.layers.argmax(result_A, axis=3)
-    result_B = fluid.layers.argmax(result_B, axis=3)
+    signal_AB = fluid.layers.resize_nearest(signal_AB, im_shape_L)
+    result_AB = fluid.layers.transpose(signal_AB, [0, 2, 3, 1])
+    result_AB = fluid.layers.argmax(result_AB, axis=3)
 
 exe.run(start_program)
 
@@ -72,8 +67,8 @@ def if_exist(var):
 fluid.io.load_vars(exe, CHECK_POINTS_DIR, train_program, predicate=if_exist)
 print(var_count, "组参数加载成功\t", ignore_count, "组参数被忽略，存在不可训练函数，忽略后默认在__model__中保存，不影响使用")
 
-feeded_var_names = ["ipt_layer_L", "ipt_layer_AB"]
-target_vars = [signal_L, result_A, result_B]
+feed_var_names = ["ipt_layer_L", "ipt_layer_AB"]
+target_vars = [signal_L, result_AB]
 print("正在合并参数")
-fluid.io.save_inference_model(SAVE_DIR, feeded_var_names, target_vars, exe, train_program)
+fluid.io.save_inference_model(SAVE_DIR, feed_var_names, target_vars, exe, train_program)
 print("保存成功", SAVE_DIR)

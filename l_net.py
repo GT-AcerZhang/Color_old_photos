@@ -33,36 +33,54 @@ def get_i_n_leaky_relu(ipt):
                                      param_attr=scale_param,
                                      bias_attr=offset_param,
                                      name=GLOBAL_NAME + "I_N_" + str(GLOBAL_ID))
-    return fluid.layers.leaky_relu(i_n)
+    return fluid.layers.leaky_relu(i_n, name=GLOBAL_NAME + "leaky_relu" + str(GLOBAL_ID))
+
+
+def get_bn_leaky_relu(ipt):
+    global GLOBAL_ID
+    GLOBAL_ID += 1
+    param_attr = fluid.ParamAttr(
+        name=GLOBAL_NAME + "B_N_W_" + str(GLOBAL_ID),
+        initializer=fluid.initializer.Normal(
+            loc=1.0, scale=0.02))
+    bias_attr = fluid.ParamAttr(
+        name=GLOBAL_NAME + "B_N_B_" + str(GLOBAL_ID),
+        initializer=fluid.initializer.Constant(value=0.0))
+    b_n = fluid.layers.batch_norm(ipt,
+                                  param_attr=param_attr,
+                                  bias_attr=bias_attr,
+                                  name=GLOBAL_NAME + "B_N_" + str(GLOBAL_ID))
+    return fluid.layers.leaky_relu(b_n, name=GLOBAL_NAME + "leaky_relu" + str(GLOBAL_ID))
 
 
 def conv_x3(data, out_ch):
     global GLOBAL_ID
     GLOBAL_ID += 1
-    data = get_i_n_leaky_relu(fluid.layers.conv2d(data,
-                                                  out_ch,
-                                                  3,
-                                                  stride=1,
-                                                  padding=1,
-                                                  param_attr=get_conv_param(),
-                                                  name=GLOBAL_NAME + "CONV1_" + str(GLOBAL_ID)))
-    data_1 = get_i_n_leaky_relu(fluid.layers.conv2d(data,
-                                                    out_ch,
-                                                    3,
-                                                    stride=1,
-                                                    padding=1,
-                                                    param_attr=get_conv_param(),
-                                                    name=GLOBAL_NAME + "CONV2_" + str(GLOBAL_ID)))
-    data_2 = get_i_n_leaky_relu(fluid.layers.conv2d(data_1,
-                                                    out_ch,
-                                                    3,
-                                                    stride=1,
-                                                    padding="SAME",
-                                                    dilation=3,
-                                                    param_attr=get_conv_param(),
-                                                    name=GLOBAL_NAME + "CONV3_" + str(GLOBAL_ID)))
-    data = fluid.layers.concat([data_1, data_2], axis=1)
-    return data
+    data = get_bn_leaky_relu(fluid.layers.conv2d(data,
+                                                 out_ch,
+                                                 3,
+                                                 stride=1,
+                                                 padding=1,
+                                                 param_attr=get_conv_param(),
+                                                 name=GLOBAL_NAME + "CONV1_" + str(GLOBAL_ID)))
+    data_1 = get_bn_leaky_relu(fluid.layers.conv2d(data,
+                                                   out_ch,
+                                                   3,
+                                                   stride=1,
+                                                   padding=1,
+                                                   param_attr=get_conv_param(),
+                                                   name=GLOBAL_NAME + "CONV2_" + str(GLOBAL_ID)))
+    # data_2 = get_bn_leaky_relu(fluid.layers.conv2d(data_1,
+    #                                                out_ch,
+    #                                                3,
+    #                                                stride=1,
+    #                                                padding="SAME",
+    #                                                dilation=3,
+    #                                                param_attr=get_conv_param(),
+    #                                                name=GLOBAL_NAME + "CONV3_" + str(GLOBAL_ID)))
+    # data = fluid.layers.concat([data_1, data_2], axis=1)
+    # return data
+    return data_1
 
 
 def down(data, out_ch):
