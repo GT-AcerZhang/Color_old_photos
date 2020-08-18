@@ -4,7 +4,7 @@ import numpy as np
 import cv2 as cv
 from sklearn.cluster import KMeans
 
-CLASS_NUM = 32
+CLASS_NUM = 255
 MAX_ITER = 10
 R_IMG_SIZE = (512, 512)  # 采样分辨率，越高越好 - 可能出现内存爆炸现象
 IMAGE_DIR_PATH = "./test2017"

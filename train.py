@@ -54,7 +54,6 @@ with fluid.program_guard(train_program, start_program):
         ipt_label = fluid.data(name="ipt_label_" + MODE, shape=[-1, 1, -1, -1], dtype="int64")
         w_ab = get_weight()
         ipt_w = fluid.layers.assign(w_ab)
-        fluid.layers.Print(ipt_w)
         # ipt_w = fluid.layers.softmax(ipt_w)
 
     # 获得shape参数
