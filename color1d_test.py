@@ -28,7 +28,7 @@ with open(DICT_PATH, "r", encoding="utf-8") as f:
 
 IM_SIZE = [256] * 2
 
-tmp = cv.imread(IMAGE)  # 83382486
+tmp = cv.imread(IMAGE)
 o_l, label_a, label_b = cvt_process(tmp, c_d)
 img_a = cvt_color(label_a, a_dict1)
 img_b = cvt_color(label_b, b_dict1)
