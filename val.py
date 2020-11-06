@@ -11,7 +11,7 @@ from data_reader import reader
 # from color2d import cvt2color
 from color1d import cvt2color
 
-TEST_DATA_PATH = "./data/ff"
+TEST_DATA_PATH = "data/train"
 MODEL_DIR = "./color.model"
 DICT_PATH = "./color_files/Color1D_Base.dict"
 

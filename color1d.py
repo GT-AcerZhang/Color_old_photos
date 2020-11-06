@@ -55,12 +55,6 @@ def analysis1d(signal, step):
 
 
 def cvt2label(ab_img, label_map):
-    # h, w = ab_img.shape[:2]
-    # result = np.zeros([h, w], dtype="uint8")
-    # for pix_h in range(h):
-    #     for pix_w in range(w):
-    #         pix = ab_img[pix_h][pix_w]
-    #         result[pix_h][pix_w] = label_map[pix]
     result = deepcopy(ab_img).astype("uint8")
     for value in range(256):
         if value in ab_img:
@@ -128,7 +122,7 @@ if __name__ == '__main__':
         print("已保存至./Color1D.dict \n分类数为:", a_num * b_num, "\tA:", a_num, "\tB:", b_num)
         print("混乱度：", a_acc * b_acc * 100 * 100, "\tA/B:", a_acc, b_acc)
 
-    im = cv.imread("data/ff/000000000275.jpg")
+    im = cv.imread("data/train/000000000275.jpg")
     im = cv.cvtColor(im, cv.COLOR_BGR2LAB)
     vdl_l, vdl_a, vdl_b = cv.split(im)
     vdl_a = cvt2label(vdl_a, a_label_map)

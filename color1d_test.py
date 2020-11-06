@@ -1,7 +1,7 @@
 import cv2 as cv
 
 DICT_PATH = "color_files/Color1D_Beta.dict"
-IMAGE = r"/Users/zhanghongji/PycharmProjects/Color_old_photos/data/ff/000000000275.jpg"
+IMAGE = r"/Users/zhanghongji/PycharmProjects/Color_old_photos/data/train/000000000275.jpg"
 
 
 def cvt_color(ori_img, color_dict: dict):
