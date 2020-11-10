@@ -32,7 +32,7 @@ def check_gray(ipt):
     h, s, v = cv.split(img_hsv)
     s_w, s_h = s.shape[:2]
     s_sum = np.sum(s) / (s_w * s_h)
-    if s_sum > 15:
+    if s_sum > 25:
         return False
     else:
         return True
@@ -60,7 +60,7 @@ def cvt_sample_with_l(sample):
 
 
 class Reader(paddle.io.Dataset):
-    def __init__(self, data_dir, add_label: bool = True, cache_file="./cache.list"):
+    def __init__(self, data_dir, add_label: bool = True, is_val: bool = False, cache_file="./cache.list"):
         super().__init__()
         self.add_label = add_label
         img_list = os.listdir(data_dir)
@@ -102,6 +102,8 @@ class Reader(paddle.io.Dataset):
             with open(cache_file, "w", encoding="utf-8") as cache:
                 cache.write(str(self.img_list))
             print("可用数据：", len(self.img_list), "异常数据：", bad_count)
+        if is_val:
+            self.img_list = self.img_list[:300]
 
     def __getitem__(self, index):
         file_path = self.img_list[index]
